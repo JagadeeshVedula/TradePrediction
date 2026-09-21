@@ -1,0 +1,72 @@
+name: Stock AI Predictor Automated Scheduler
+
+on:
+  schedule:
+    # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction Run
+    - cron: '45 3 * * 1-5'
+    # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Close Retraining & Report Run
+    - cron: '0 11 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Operation Mode (morning / evening / full-cycle / train-initial / test-telegram)'
+        required: true
+        default: 'morning'
+        type: choice
+        options:
+          - morning
+          - evening
+          - full-cycle
+          - train-initial
+          - test-telegram
+
+jobs:
+  run-stock-ai:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/python-version@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Determine Mode from Schedule
+        id: select_mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          else
+            HOUR=$(date -u +%H)
+            if [ "$HOUR" -lt "8" ]; then
+              echo "mode=morning" >> $GITHUB_OUTPUT
+            else
+              echo "mode=evening" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Execute Stock AI Predictor
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET || 'ml-models' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MODE="${{ steps.select_mode.outputs.mode }}"
+          echo "🚀 Executing Stock AI in mode: $MODE"
+          if [ "$MODE" = "morning" ]; then
+            python main.py --mode morning --send-telegram
+          elif [ "$MODE" = "evening" ]; then
+            python main.py --mode evening
+          else
+            python main.py --mode "$MODE" --send-telegram
+          fi

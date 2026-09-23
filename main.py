@@ -14,14 +14,15 @@ from database import init_db, save_predictions, save_outcomes
 from ml_model import TechStockPredictor
 from reporter import generate_morning_report_markdown, generate_evening_report_markdown
 from telegram_bot import send_telegram_message, test_telegram_connection, get_telegram_chat_ids
+from intraday_tracker import run_intraday_1m_tracker
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Top 5 Indian Stocks Gain Predictor & Retraining System")
+    parser = argparse.ArgumentParser(description="Top 5 Indian Stocks (< ₹500) Gain Predictor & Intraday 1m Tracker System")
     parser.add_argument(
         "--mode",
-        choices=["morning", "evening", "train-initial", "test-telegram", "get-chats", "full-cycle"],
+        choices=["morning", "evening", "monitor", "train-initial", "test-telegram", "get-chats", "full-cycle"],
         default="morning",
-        help="Operation mode: 'morning' (predictions), 'evening' (close results & retraining), 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle'"
+        help="Operation mode: 'morning' (predictions), 'evening' (P&L report & retraining), 'monitor' (1m intraday tracker), 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle'"
     )
     parser.add_argument(
         "--date",
@@ -44,7 +45,7 @@ def run_train_initial():
     print(f"🎉 Initial model successfully trained on {samples_count} historical samples (MAE: {mae:.4f}).")
 
 def run_morning_mode(date_str: str, send_telegram: bool = False):
-    print(f"🌅 Running Morning Analysis for Top Indian Stocks ({date_str})...")
+    print(f"🌅 Running Morning Analysis for Top Indian Stocks under ₹500 ({date_str})...")
     init_db()
     predictor = TechStockPredictor()
     
@@ -55,7 +56,7 @@ def run_morning_mode(date_str: str, send_telegram: bool = False):
 
     # Save to database
     save_predictions(date_str, top_5)
-    print(f"💾 Top 5 predictions saved to database for date {date_str}.")
+    print(f"💾 Top 5 predictions (< ₹500) saved to database for date {date_str}.")
 
     # Generate Morning Report
     report = generate_morning_report_markdown(date_str, top_5)
@@ -95,6 +96,8 @@ def main():
         run_morning_mode(date_str, send_telegram=args.send_telegram)
     elif args.mode == "evening":
         run_evening_mode(date_str, send_telegram=True)
+    elif args.mode == "monitor":
+        run_intraday_1m_tracker(date_str=date_str)
     elif args.mode == "test-telegram":
         print("📲 Testing Telegram Bot connectivity...")
         test_telegram_connection()
@@ -108,3 +111,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

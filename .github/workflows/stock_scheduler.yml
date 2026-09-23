@@ -2,19 +2,20 @@ name: Stock AI Predictor Automated Scheduler
 
 on:
   schedule:
-    # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction Run
-    - cron: '07 3 * * 1-5'
-    # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Close Retraining & Report Run
-    - cron: '07 11 * * 1-5'
+    # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction & 1-Minute Live Monitoring Session
+    - cron: '45 3 * * 1-5'
+    # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Report & ML Retraining Backup
+    - cron: '00 11 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Operation Mode (morning / evening / full-cycle / train-initial / test-telegram)'
+        description: 'Operation Mode (morning / monitor / evening / full-cycle / train-initial / test-telegram)'
         required: true
         default: 'morning'
         type: choice
         options:
           - morning
+          - monitor
           - evening
           - full-cycle
           - train-initial
@@ -23,6 +24,7 @@ on:
 jobs:
   run-stock-ai:
     runs-on: ubuntu-latest
+    timeout-minutes: 390 # Allow up to 6.5 hours for full market session 1-minute live tracking
 
     steps:
       - name: Checkout Repository
@@ -64,9 +66,19 @@ jobs:
           MODE="${{ steps.select_mode.outputs.mode }}"
           echo "🚀 Executing Stock AI in mode: $MODE"
           if [ "$MODE" = "morning" ]; then
+            # 1. Generate morning predictions (< ₹500 stocks, ₹25k allocation)
             python main.py --mode morning --send-telegram
+            
+            # 2. Run 1-minute intraday tracking loop until 03:30 PM IST (10:00 UTC)
+            echo "⏱️ Starting 1-minute live intraday tracking loop..."
+            python main.py --mode monitor
+            
+            # 3. Generate final evening P&L report after market close
+            echo "🌆 Market session ended. Generating evening P&L report..."
+            python main.py --mode evening
           elif [ "$MODE" = "evening" ]; then
             python main.py --mode evening
           else
             python main.py --mode "$MODE" --send-telegram
           fi
+

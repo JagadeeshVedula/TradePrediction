@@ -200,3 +200,125 @@ def fetch_market_close_actuals(ticker: str, target_date_str: str) -> Optional[Di
     except Exception as e:
         print(f"Error fetching market close actuals for {ticker}: {e}")
         return None
+
+def fetch_intraday_1m_data(ticker: str) -> pd.DataFrame:
+    """Fetch 1-minute interval intraday stock price bars for current trading session."""
+    ticker = normalize_ticker(ticker)
+    try:
+        df = yf.download(ticker, period="1d", interval="1m", progress=False)
+        if df.empty:
+            df = yf.download(ticker, period="5d", interval="1m", progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df
+    except Exception as e:
+        print(f"Error fetching 1m intraday data for {ticker}: {e}")
+        return pd.DataFrame()
+
+def evaluate_intraday_trade_1m(
+    ticker: str,
+    entry_price: float,
+    target_date_str: str,
+    target_rupees: float = 1.0,
+    stop_loss_rupees: float = 3.0
+) -> Dict[str, Any]:
+    """
+    Evaluate intraday price action minute-by-minute against +1 Rupee Target & -3 Rupee Stop Loss rules.
+    Returns exact exit price, exit timestamp, exit reason, and per-share P&L.
+    """
+    ticker = normalize_ticker(ticker)
+    target_price = round(entry_price + target_rupees, 2)
+    stop_loss_price = round(entry_price - stop_loss_rupees, 2)
+
+    df_1m = fetch_intraday_1m_data(ticker)
+    
+    if df_1m.empty:
+        # Fallback to standard close actuals if 1-minute data is unavailable
+        daily_actuals = fetch_market_close_actuals(ticker, target_date_str)
+        if daily_actuals:
+            close_p = daily_actuals['close_price']
+            high_p = daily_actuals['high_price']
+            low_p = daily_actuals['low_price']
+
+            if high_p >= target_price:
+                exit_price = target_price
+                exit_reason = "TARGET_MET (+₹1)"
+            elif low_p <= stop_loss_price:
+                exit_price = stop_loss_price
+                exit_reason = "STOP_LOSS_HIT (-₹3)"
+            else:
+                exit_price = close_p
+                exit_reason = "MARKET_CLOSE"
+
+            pnl_per_share = round(exit_price - entry_price, 2)
+            return {
+                'ticker': ticker,
+                'entry_price': entry_price,
+                'exit_price': exit_price,
+                'high_price': high_p,
+                'low_price': low_p,
+                'close_price': close_p,
+                'exit_reason': exit_reason,
+                'exit_time': 'EOD',
+                'pnl_per_share': pnl_per_share
+            }
+
+    # Filter 1m bars for target date if available
+    df_1m.index = pd.to_datetime(df_1m.index)
+    matching_bars = df_1m[df_1m.index.strftime('%Y-%m-%d') == target_date_str]
+    if matching_bars.empty:
+        # Fall back to latest available session bars
+        matching_bars = df_1m
+
+    exit_price = None
+    exit_reason = "MARKET_CLOSE"
+    exit_time = "15:30"
+    high_seen = entry_price
+    low_seen = entry_price
+
+    for idx, row in matching_bars.iterrows():
+        bar_high = _to_scalar(row['High'])
+        bar_low = _to_scalar(row['Low'])
+        bar_close = _to_scalar(row['Close'])
+        time_str = idx.strftime('%H:%M') if hasattr(idx, 'strftime') else '15:30'
+
+        if bar_high > high_seen:
+            high_seen = bar_high
+        if bar_low < low_seen:
+            low_seen = bar_low
+
+        # Check Target (+1 Rupee)
+        if bar_high >= target_price:
+            exit_price = target_price
+            exit_reason = "TARGET_MET (+₹1)"
+            exit_time = time_str
+            break
+
+        # Check Stop-Loss (-3 Rupees)
+        if bar_low <= stop_loss_price:
+            exit_price = stop_loss_price
+            exit_reason = "STOP_LOSS_HIT (-₹3)"
+            exit_time = time_str
+            break
+
+    # If neither triggered during session, exit at final bar close
+    if exit_price is None:
+        last_row = matching_bars.iloc[-1]
+        exit_price = round(_to_scalar(last_row['Close']), 2)
+        exit_reason = "MARKET_CLOSE"
+        exit_time = "15:30"
+
+    pnl_per_share = round(exit_price - entry_price, 2)
+
+    return {
+        'ticker': ticker,
+        'entry_price': entry_price,
+        'exit_price': exit_price,
+        'high_price': round(high_seen, 2),
+        'low_price': round(low_seen, 2),
+        'close_price': round(_to_scalar(matching_bars.iloc[-1]['Close']), 2),
+        'exit_reason': exit_reason,
+        'exit_time': exit_time,
+        'pnl_per_share': pnl_per_share
+    }
+

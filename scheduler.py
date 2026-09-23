@@ -23,9 +23,10 @@ def run_job(mode: str):
 
 def start_scheduler():
     """Daily scheduler loop monitoring market hours."""
-    print("⏰ Indian Stock Trading AI Scheduler Started...")
-    print("  • Scheduled Morning Prediction Run: 09:15 AM IST (NSE/BSE Open)")
-    print("  • Scheduled Evening Report & Retraining Run: 04:30 PM IST (Post-Close)")
+    print("⏰ Indian Stock Trading AI Scheduler Started (< ₹500 Universe)...")
+    print("  • Scheduled Morning Prediction Run: 09:15 AM IST")
+    print("  • Intraday 1-Minute Live Monitoring: 09:15 AM - 03:30 PM IST (+₹1 Target / -₹3 Stop Loss)")
+    print("  • Scheduled Evening Report & Retraining Run: 04:30 PM IST")
     print("Press Ctrl+C to exit.\n")
 
     morning_executed_today = False
@@ -45,9 +46,17 @@ def start_scheduler():
         if is_market_day():
             # Morning trigger around 09:15 AM
             if now.hour == 9 and now.minute >= 15 and not morning_executed_today:
-                print("🌅 Market Open Time Reached! Running Morning Analysis...")
+                print("🌅 Market Open Time Reached! Running Morning Analysis (< ₹500 stocks)...")
                 run_job("morning")
                 morning_executed_today = True
+
+            # Intraday 1-minute monitoring during market hours (09:15 - 15:30)
+            if (now.hour > 9 or (now.hour == 9 and now.minute >= 15)) and (now.hour < 15 or (now.hour == 15 and now.minute <= 30)):
+                if morning_executed_today and not evening_executed_today:
+                    print("⏱️ Running 1-minute intraday price check pass...")
+                    date_str = today.strftime("%Y-%m-%d")
+                    cmd = [sys.executable, "main.py", "--mode", "monitor", "--date", date_str]
+                    subprocess.run(cmd)
 
             # Evening trigger around 16:30 PM (4:30 PM)
             if now.hour == 16 and now.minute >= 30 and not evening_executed_today:
@@ -55,7 +64,8 @@ def start_scheduler():
                 run_job("evening")
                 evening_executed_today = True
 
-        time.sleep(30)
+        time.sleep(60)
 
 if __name__ == "__main__":
     start_scheduler()
+

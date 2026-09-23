@@ -47,6 +47,8 @@ def init_db():
                 stop_loss REAL NOT NULL,
                 confidence_score REAL NOT NULL,
                 signal_reasons TEXT,
+                quantity INTEGER DEFAULT 0,
+                invested_amount REAL DEFAULT 0.0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(date, ticker)
             )
@@ -64,10 +66,45 @@ def init_db():
                 actual_gain_pct REAL NOT NULL,
                 max_gain_pct REAL NOT NULL,
                 status TEXT NOT NULL,
+                quantity INTEGER DEFAULT 0,
+                invested_amount REAL DEFAULT 0.0,
+                exit_price REAL DEFAULT 0.0,
+                exit_reason TEXT,
+                exit_time TEXT,
+                pnl_per_share REAL DEFAULT 0.0,
+                total_pnl REAL DEFAULT 0.0,
+                pnl_pct REAL DEFAULT 0.0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(date, ticker)
             )
         ''')
+
+        # Run safe migration checks for existing SQLite database
+        cursor.execute("PRAGMA table_info(predictions)")
+        pred_cols = [col[1] for col in cursor.fetchall()]
+        if "quantity" not in pred_cols:
+            cursor.execute("ALTER TABLE predictions ADD COLUMN quantity INTEGER DEFAULT 0")
+        if "invested_amount" not in pred_cols:
+            cursor.execute("ALTER TABLE predictions ADD COLUMN invested_amount REAL DEFAULT 0.0")
+
+        cursor.execute("PRAGMA table_info(outcomes)")
+        out_cols = [col[1] for col in cursor.fetchall()]
+        if "quantity" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN quantity INTEGER DEFAULT 0")
+        if "invested_amount" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN invested_amount REAL DEFAULT 0.0")
+        if "exit_price" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN exit_price REAL DEFAULT 0.0")
+        if "exit_reason" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN exit_reason TEXT")
+        if "exit_time" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN exit_time TEXT")
+        if "pnl_per_share" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN pnl_per_share REAL DEFAULT 0.0")
+        if "total_pnl" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN total_pnl REAL DEFAULT 0.0")
+        if "pnl_pct" not in out_cols:
+            cursor.execute("ALTER TABLE outcomes ADD COLUMN pnl_pct REAL DEFAULT 0.0")
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS model_retraining_log (
@@ -100,7 +137,9 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
                     'target_price': float(p['target_price']),
                     'stop_loss': float(p['stop_loss']),
                     'confidence_score': float(p['confidence_score']),
-                    'signal_reasons': p.get('signal_reasons', '')
+                    'signal_reasons': p.get('signal_reasons', ''),
+                    'quantity': int(p.get('quantity', 0)),
+                    'invested_amount': float(p.get('invested_amount', 0.0))
                 })
             if records:
                 sb.table("predictions").insert(records).execute()
@@ -117,8 +156,8 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
         for p in predictions:
             cursor.execute('''
                 INSERT INTO predictions 
-                (date, ticker, rank, starting_price, expected_gain_pct, target_price, stop_loss, confidence_score, signal_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date, ticker, rank, starting_price, expected_gain_pct, target_price, stop_loss, confidence_score, signal_reasons, quantity, invested_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 date_str,
                 p['ticker'],
@@ -128,7 +167,9 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
                 p['target_price'],
                 p['stop_loss'],
                 p['confidence_score'],
-                p.get('signal_reasons', '')
+                p.get('signal_reasons', ''),
+                p.get('quantity', 0),
+                p.get('invested_amount', 0.0)
             ))
         conn.commit()
 
@@ -169,7 +210,15 @@ def save_outcomes(date_str: str, outcomes: List[Dict[str, Any]]) -> None:
                     'low_price': float(o['low_price']),
                     'actual_gain_pct': float(o['actual_gain_pct']),
                     'max_gain_pct': float(o['max_gain_pct']),
-                    'status': o['status']
+                    'status': o['status'],
+                    'quantity': int(o.get('quantity', 0)),
+                    'invested_amount': float(o.get('invested_amount', 0.0)),
+                    'exit_price': float(o.get('exit_price', o['close_price'])),
+                    'exit_reason': o.get('exit_reason', 'MARKET_CLOSE'),
+                    'exit_time': o.get('exit_time', '15:30'),
+                    'pnl_per_share': float(o.get('pnl_per_share', 0.0)),
+                    'total_pnl': float(o.get('total_pnl', 0.0)),
+                    'pnl_pct': float(o.get('pnl_pct', 0.0))
                 })
             if records:
                 sb.table("outcomes").insert(records).execute()
@@ -186,8 +235,9 @@ def save_outcomes(date_str: str, outcomes: List[Dict[str, Any]]) -> None:
         for o in outcomes:
             cursor.execute('''
                 INSERT INTO outcomes 
-                (date, ticker, starting_price, close_price, high_price, low_price, actual_gain_pct, max_gain_pct, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date, ticker, starting_price, close_price, high_price, low_price, actual_gain_pct, max_gain_pct, status,
+                 quantity, invested_amount, exit_price, exit_reason, exit_time, pnl_per_share, total_pnl, pnl_pct)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 date_str,
                 o['ticker'],
@@ -197,9 +247,18 @@ def save_outcomes(date_str: str, outcomes: List[Dict[str, Any]]) -> None:
                 o['low_price'],
                 o['actual_gain_pct'],
                 o['max_gain_pct'],
-                o['status']
+                o['status'],
+                o.get('quantity', 0),
+                o.get('invested_amount', 0.0),
+                o.get('exit_price', o['close_price']),
+                o.get('exit_reason', 'MARKET_CLOSE'),
+                o.get('exit_time', '15:30'),
+                o.get('pnl_per_share', 0.0),
+                o.get('total_pnl', 0.0),
+                o.get('pnl_pct', 0.0)
             ))
         conn.commit()
+
 
 def get_outcomes_by_date(date_str: str) -> List[Dict[str, Any]]:
     """Retrieve actual outcomes recorded for a given date."""

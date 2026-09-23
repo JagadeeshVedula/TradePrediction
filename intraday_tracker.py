@@ -8,7 +8,8 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-from config import INVESTMENT_PER_STOCK, PROFIT_TARGET_INR, STOP_LOSS_INR
+from zoneinfo import ZoneInfo
+from config import INVESTMENT_PER_STOCK, PROFIT_TARGET_INR, STOP_LOSS_INR, PRE_10AM_PROFIT_TARGET_INR
 from database import get_predictions_by_date, save_outcomes, get_outcomes_by_date
 from data_fetcher import fetch_intraday_1m_data, normalize_ticker, _to_scalar
 from telegram_bot import send_telegram_message
@@ -17,7 +18,7 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
     """
     1-Minute Intraday Monitoring Service:
     Polls active morning predictions every 60 seconds during market hours.
-    Evaluates +₹1 Profit Target and -₹3 Stop Loss exit conditions.
+    Evaluates +₹1 Profit Target and -₹3 Stop Loss exit conditions (with pre-10 AM +₹10 rule).
     """
     if not date_str:
         date_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -28,7 +29,7 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
         print(f"⚠️ No morning predictions found for date {date_str}. Please run morning mode first.")
         return
 
-    print(f"📌 Monitoring {len(predictions)} active stocks (Filter: < ₹500 | Allocation: ₹25,000 | Target: +₹1 | Stop Loss: -₹3)")
+    print(f"📌 Monitoring {len(predictions)} active stocks (Filter: < ₹500 | Allocation: ₹25,000 | Pre-10AM: +₹10 | Post-10AM Target: +₹{PROFIT_TARGET_INR:g} | Stop Loss: -₹{STOP_LOSS_INR:g})")
 
     active_positions = {}
     for p in predictions:
@@ -52,22 +53,24 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
             'exit_time': None
         }
 
-    # Load any pre-existing exits for today
+    # Load any pre-existing exits for today (Skip pending states like MARKET_NOT_OPEN_YET or SESSION_PENDING)
     existing_outcomes = get_outcomes_by_date(date_str)
     for o in existing_outcomes:
         ticker = o['ticker']
-        if ticker in active_positions and o.get('exit_reason') and o['exit_reason'] != 'OPEN':
+        reason = o.get('exit_reason') or ''
+        if ticker in active_positions and reason and reason not in ['OPEN', 'MARKET_NOT_OPEN_YET', 'SESSION_PENDING']:
             active_positions[ticker]['status'] = 'CLOSED'
             active_positions[ticker]['exit_price'] = o['exit_price']
             active_positions[ticker]['exit_reason'] = o['exit_reason']
             active_positions[ticker]['exit_time'] = o['exit_time']
 
     while True:
-        now = datetime.datetime.now()
-        time_str = now.strftime('%H:%M')
+        now_ist = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
+        time_str = now_ist.strftime('%H:%M')
+        is_before_10am = now_ist.time() < datetime.time(10, 0)
         open_count = sum(1 for pos in active_positions.values() if pos['status'] == 'OPEN')
 
-        print(f"\n🔍 [{now.strftime('%H:%M:%S')}] Polling 1-minute ticker prices ({open_count}/5 positions OPEN)...")
+        print(f"\n🔍 [{now_ist.strftime('%H:%M:%S IST')}] Polling 1-minute ticker prices ({open_count}/5 positions OPEN)...")
 
         for ticker, pos in list(active_positions.items()):
             if pos['status'] != 'OPEN':
@@ -90,31 +93,48 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
 
             print(f"  • {ticker}: Entry ₹{pos['entry_price']:.2f} | Current ₹{curr_price:.2f} (High ₹{pos['high_price']:.2f} / Low ₹{pos['low_price']:.2f})")
 
-            # Check +1 Rupee Target Hit
-            if bar_high >= pos['target_price']:
-                pos['status'] = 'CLOSED'
-                pos['exit_price'] = pos['target_price']
-                pos['exit_reason'] = 'TARGET_MET (+₹1)'
-                pos['exit_time'] = time_str
-                pnl_share = PROFIT_TARGET_INR
-                total_pnl = round(pos['quantity'] * pnl_share, 2)
-                
-                msg = f"🎯 *TARGET HIT ALERT!* 🚀\nStock: *{ticker}*\nBought {pos['quantity']} shares @ ₹{pos['entry_price']:.2f}\nSold @ ₹{pos['exit_price']:.2f} (+₹1.00)\nNet Profit: *+₹{total_pnl:,.2f}*"
-                print(f"  🎉 {msg.replace('*', '')}")
-                send_telegram_message(msg)
+            early_target_price = round(pos['entry_price'] + PRE_10AM_PROFIT_TARGET_INR, 2)
 
-            # Check -3 Rupee Stop Loss Hit
-            elif bar_low <= pos['stop_loss_price']:
-                pos['status'] = 'CLOSED'
-                pos['exit_price'] = pos['stop_loss_price']
-                pos['exit_reason'] = 'STOP_LOSS_HIT (-₹3)'
-                pos['exit_time'] = time_str
-                pnl_share = -STOP_LOSS_INR
-                total_pnl = round(pos['quantity'] * pnl_share, 2)
-                
-                msg = f"🔴 *STOP LOSS TRIGGERED!* ⚠️\nStock: *{ticker}*\nBought {pos['quantity']} shares @ ₹{pos['entry_price']:.2f}\nSold @ ₹{pos['exit_price']:.2f} (-₹3.00)\nNet Loss: *₹{total_pnl:,.2f}*"
-                print(f"  ⚠️ {msg.replace('*', '')}")
-                send_telegram_message(msg)
+            if is_before_10am:
+                # Before 10:00 AM IST: ONLY sell if stock rises by +10 Rupees
+                if bar_high >= early_target_price:
+                    pos['status'] = 'CLOSED'
+                    pos['exit_price'] = early_target_price
+                    pos['exit_reason'] = 'EARLY_TARGET_MET (+₹10)'
+                    pos['exit_time'] = time_str
+                    pnl_share = PRE_10AM_PROFIT_TARGET_INR
+                    total_pnl = round(pos['quantity'] * pnl_share, 2)
+                    
+                    msg = f"🚀 *PRE-10AM EARLY TARGET HIT ALERT!* 🚀\nStock: *{ticker}*\nBought {pos['quantity']} shares @ ₹{pos['entry_price']:.2f}\nSold @ ₹{pos['exit_price']:.2f} (+₹10.00)\nNet Profit: *+₹{total_pnl:,.2f}*"
+                    print(f"  🎉 {msg.replace('*', '')}")
+                    send_telegram_message(msg)
+            else:
+                # After 10:00 AM IST: Target or Stop Loss
+                # Check Target Hit
+                if bar_high >= pos['target_price']:
+                    pos['status'] = 'CLOSED'
+                    pos['exit_price'] = pos['target_price']
+                    pos['exit_reason'] = f'TARGET_MET (+₹{PROFIT_TARGET_INR:g})'
+                    pos['exit_time'] = time_str
+                    pnl_share = PROFIT_TARGET_INR
+                    total_pnl = round(pos['quantity'] * pnl_share, 2)
+                    
+                    msg = f"🎯 *TARGET HIT ALERT!* 🚀\nStock: *{ticker}*\nBought {pos['quantity']} shares @ ₹{pos['entry_price']:.2f}\nSold @ ₹{pos['exit_price']:.2f} (+₹{PROFIT_TARGET_INR:.2f})\nNet Profit: *+₹{total_pnl:,.2f}*"
+                    print(f"  🎉 {msg.replace('*', '')}")
+                    send_telegram_message(msg)
+
+                # Check Stop Loss Hit
+                elif bar_low <= pos['stop_loss_price']:
+                    pos['status'] = 'CLOSED'
+                    pos['exit_price'] = pos['stop_loss_price']
+                    pos['exit_reason'] = f'STOP_LOSS_HIT (-₹{STOP_LOSS_INR:g})'
+                    pos['exit_time'] = time_str
+                    pnl_share = -STOP_LOSS_INR
+                    total_pnl = round(pos['quantity'] * pnl_share, 2)
+                    
+                    msg = f"🔴 *STOP LOSS TRIGGERED!* ⚠️\nStock: *{ticker}*\nBought {pos['quantity']} shares @ ₹{pos['entry_price']:.2f}\nSold @ ₹{pos['exit_price']:.2f} (-₹{STOP_LOSS_INR:.2f})\nNet Loss: *₹{total_pnl:,.2f}*"
+                    print(f"  ⚠️ {msg.replace('*', '')}")
+                    send_telegram_message(msg)
 
         # Sync active positions status to SQLite outcomes
         outcomes_to_save = []
@@ -151,7 +171,7 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
             break
 
         # Check market close time (15:30 IST)
-        if now.hour >= 15 and now.minute >= 30:
+        if now_ist.hour >= 15 and now_ist.minute >= 30:
             print("🌆 Market Close Time Reached (15:30 IST). Closing 1-minute monitoring daemon.")
             break
 

@@ -1,5 +1,7 @@
 from typing import List, Dict, Any
 
+from config import PROFIT_TARGET_INR, STOP_LOSS_INR
+
 def _get_curr_symbol(ticker: str) -> str:
     """Return ₹ for Indian stocks (default currency)."""
     return "₹"
@@ -11,7 +13,7 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
     lines.append(f"📅 *Date:* {date_str} | *NSE Intraday Trading Strategy*")
     lines.append("───────────────────────────")
     lines.append("💼 *Investment Rules:* Assumed ₹25,000 on each stock (Total: ₹1,25,000)")
-    lines.append("🎯 *Exit Strategy:* Target +₹1.00 Gain | Stop Loss -₹3.00 Risk")
+    lines.append(f"🎯 *Exit Strategy:* Pre-10:00 AM Sell on +₹10.00 | Post-10:00 AM Target +₹{PROFIT_TARGET_INR:.2f} / Stop Loss -₹{STOP_LOSS_INR:.2f}")
     lines.append("───────────────────────────")
     lines.append("")
 
@@ -22,8 +24,8 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         ticker = item.get('ticker')
         curr = _get_curr_symbol(ticker)
         start_p = item.get('starting_price', 0.0)
-        target_p = item.get('target_price', start_p + 1.0)
-        stop_l = item.get('stop_loss', start_p - 3.0)
+        target_p = item.get('target_price', start_p + PROFIT_TARGET_INR)
+        stop_l = item.get('stop_loss', start_p - STOP_LOSS_INR)
         conf = item.get('confidence_score', 0.0)
         qty = item.get('quantity', max(1, int(25000 / start_p)) if start_p > 0 else 0)
         inv_amt = item.get('invested_amount', round(qty * start_p, 2))
@@ -34,8 +36,8 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         lines.append(f"  • *Entry Price:* {curr}{start_p:.2f} (< ₹500)")
         lines.append(f"  • *Shares Quantity:* {qty} shares")
         lines.append(f"  • *Capital Invested:* {curr}{inv_amt:,.2f}")
-        lines.append(f"  • *Target Sell Price:* {curr}{target_p:.2f} (+₹1.00)")
-        lines.append(f"  • *Stop Loss Price:* {curr}{stop_l:.2f} (-₹3.00)")
+        lines.append(f"  • *Target Sell Price:* {curr}{target_p:.2f} (+₹{PROFIT_TARGET_INR:.2f})")
+        lines.append(f"  • *Stop Loss Price:* {curr}{stop_l:.2f} (-₹{STOP_LOSS_INR:.2f})")
         lines.append(f"  • *AI Confidence:* {conf:.1f}%")
         lines.append(f"  • *Key Signals:* _{reasons}_")
         lines.append("")
@@ -92,12 +94,17 @@ def generate_evening_report_markdown(date_str: str, summary: Dict[str, Any]) -> 
             total_invested_portfolio += inv_amt
             total_pnl_portfolio += stock_pnl
 
-            if "TARGET" in exit_reason:
-                status_badge = "🎯 *TARGET HIT (+₹1.00)*"
+            if "EARLY_TARGET" in exit_reason:
+                status_badge = "🚀 *PRE-10AM EARLY TARGET HIT (+₹10.00)*"
+                targets_met_count += 1
+            elif "TARGET" in exit_reason:
+                status_badge = f"🎯 *TARGET HIT (+₹{PROFIT_TARGET_INR:.2f})*"
                 targets_met_count += 1
             elif "STOP_LOSS" in exit_reason:
-                status_badge = "🔴 *STOP-LOSS HIT (-₹3.00)*"
+                status_badge = f"🔴 *STOP-LOSS HIT (-₹{STOP_LOSS_INR:.2f})*"
                 stop_loss_count += 1
+            elif "MARKET_NOT_OPEN" in exit_reason or "PENDING" in exit_reason:
+                status_badge = "⏳ *MARKET SESSION PENDING*"
             else:
                 market_close_count += 1
                 status_badge = "🟢 *GAIN (CLOSE)*" if stock_pnl >= 0 else "🔻 *LOSS (CLOSE)*"

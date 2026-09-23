@@ -232,7 +232,7 @@ class TechStockPredictor:
             return {'status': 'NO_PREDICTIONS', 'date': date_str}
 
         outcomes = []
-        print(f"📥 Evaluating 1-minute intraday price action (+₹1 / -₹3 rules) for Top 5 predictions on {date_str}...")
+        print(f"📥 Evaluating 1-minute intraday price action (+₹{PROFIT_TARGET_INR:g} / -₹{STOP_LOSS_INR:g} rules) for Top 5 predictions on {date_str}...")
         for p in predictions:
             ticker = p['ticker']
             entry_price = p['starting_price']

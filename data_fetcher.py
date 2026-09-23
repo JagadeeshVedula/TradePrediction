@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import datetime
+from zoneinfo import ZoneInfo
 from typing import Dict, Any, Tuple, Optional
 
 def compute_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -221,20 +222,26 @@ def evaluate_intraday_trade_1m(
     entry_price: float,
     target_date_str: str,
     target_rupees: float = 1.0,
-    stop_loss_rupees: float = 3.0
+    stop_loss_rupees: float = 3.0,
+    pre_10am_target_rupees: float = 10.0
 ) -> Dict[str, Any]:
     """
-    Evaluate intraday price action minute-by-minute against +1 Rupee Target & -3 Rupee Stop Loss rules.
+    Evaluate intraday price action minute-by-minute against updated strategy rules:
+    - Before 10:00 AM IST: Only sell if stock rises by +10 Rupees (EARLY_TARGET_MET).
+    - After 10:00 AM IST: Normal +1 Rupee Target & -3 Rupee Stop Loss rules apply.
     Returns exact exit price, exit timestamp, exit reason, and per-share P&L.
     """
     ticker = normalize_ticker(ticker)
+    ist = ZoneInfo("Asia/Kolkata")
     target_price = round(entry_price + target_rupees, 2)
+    early_target_price = round(entry_price + pre_10am_target_rupees, 2)
     stop_loss_price = round(entry_price - stop_loss_rupees, 2)
-    today_str = datetime.date.today().strftime('%Y-%m-%d')
-    now = datetime.datetime.now()
+
+    now_ist = datetime.datetime.now(ist)
+    today_str = now_ist.strftime('%Y-%m-%d')
 
     # If target date is today and market has not opened yet (before 09:15 AM IST)
-    if target_date_str == today_str and (now.hour < 9 or (now.hour == 9 and now.minute < 15)):
+    if target_date_str == today_str and (now_ist.hour < 9 or (now_ist.hour == 9 and now_ist.minute < 15)):
         return {
             'ticker': ticker,
             'entry_price': entry_price,
@@ -264,12 +271,15 @@ def evaluate_intraday_trade_1m(
             high_p = daily_actuals['high_price']
             low_p = daily_actuals['low_price']
 
-            if high_p >= target_price:
+            if high_p >= early_target_price:
+                exit_price = early_target_price
+                exit_reason = f"EARLY_TARGET_MET (+₹{pre_10am_target_rupees:g})"
+            elif high_p >= target_price:
                 exit_price = target_price
-                exit_reason = "TARGET_MET (+₹1)"
+                exit_reason = f"TARGET_MET (+₹{target_rupees:g})"
             elif low_p <= stop_loss_price:
                 exit_price = stop_loss_price
-                exit_reason = "STOP_LOSS_HIT (-₹3)"
+                exit_reason = f"STOP_LOSS_HIT (-₹{stop_loss_rupees:g})"
             else:
                 exit_price = close_p
                 exit_reason = "MARKET_CLOSE"
@@ -310,26 +320,47 @@ def evaluate_intraday_trade_1m(
         bar_high = _to_scalar(row['High'])
         bar_low = _to_scalar(row['Low'])
         bar_close = _to_scalar(row['Close'])
-        time_str = idx.strftime('%H:%M') if hasattr(idx, 'strftime') else '15:30'
+        
+        # Convert index timestamp to IST
+        idx_dt = idx
+        if hasattr(idx, 'tz_convert'):
+            if idx.tz is None:
+                idx_dt = idx.tz_localize(ist)
+            else:
+                idx_dt = idx.tz_convert(ist)
+        elif hasattr(idx, 'tz_localize'):
+            idx_dt = idx.tz_localize('UTC').tz_convert(ist)
+
+        bar_time_obj = idx_dt.time() if hasattr(idx_dt, 'time') else None
+        time_str = idx_dt.strftime('%H:%M') if hasattr(idx_dt, 'strftime') else '15:30'
 
         if bar_high > high_seen:
             high_seen = bar_high
         if bar_low < low_seen:
             low_seen = bar_low
 
-        # Check Target (+1 Rupee)
-        if bar_high >= target_price:
-            exit_price = target_price
-            exit_reason = "TARGET_MET (+₹1)"
-            exit_time = time_str
-            break
+        is_before_10am = bar_time_obj is not None and bar_time_obj < datetime.time(10, 0)
 
-        # Check Stop-Loss (-3 Rupees)
-        if bar_low <= stop_loss_price:
-            exit_price = stop_loss_price
-            exit_reason = "STOP_LOSS_HIT (-₹3)"
-            exit_time = time_str
-            break
+        if is_before_10am:
+            # Before 10:00 AM IST: ONLY exit if price reaches +₹10 gain
+            if bar_high >= early_target_price:
+                exit_price = early_target_price
+                exit_reason = f"EARLY_TARGET_MET (+₹{pre_10am_target_rupees:g})"
+                exit_time = time_str
+                break
+        else:
+            # After 10:00 AM IST: Target & Stop Loss rules
+            if bar_high >= target_price:
+                exit_price = target_price
+                exit_reason = f"TARGET_MET (+₹{target_rupees:g})"
+                exit_time = time_str
+                break
+
+            if bar_low <= stop_loss_price:
+                exit_price = stop_loss_price
+                exit_reason = f"STOP_LOSS_HIT (-₹{stop_loss_rupees:g})"
+                exit_time = time_str
+                break
 
     # If neither triggered during session, exit at final bar close
     if exit_price is None:

@@ -107,7 +107,9 @@ def generate_evening_report_markdown(date_str: str, summary: Dict[str, Any]) -> 
             lines.append(f"*{p.get('rank', 1)}. {ticker}*  {status_badge}")
             lines.append(f"  • *Entry Price:* {curr}{start_p:.2f}  ➔  *Exit Price:* {curr}{exit_p:.2f} (Time: {exit_time})")
             lines.append(f"  • *Quantity Bought:* {qty} shares @ ₹25,000 allocation ({curr}{inv_amt:,.2f})")
-            lines.append(f"  • *Exit Reason:* _{exit_reason}_")
+            clean_reason = exit_reason.replace('_', ' ')
+            lines.append(f"  • *Exit Reason:* _{clean_reason}_")
+
             lines.append(f"  • *P&L per Share:* {curr}{pnl_share:+.2f}")
             lines.append(f"  • *Stock Net P&L:* {pnl_emoji} *{curr}{stock_pnl:+,.2f}* ({pnl_pct:+.2f}%)")
             lines.append("")

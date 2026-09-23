@@ -155,7 +155,6 @@ def fetch_market_close_actuals(ticker: str, target_date_str: str) -> Optional[Di
     """Fetch actual market close prices and calculate gain/loss for an Indian stock on target date."""
     ticker = normalize_ticker(ticker)
     try:
-        # Fetch last 5 days to ensure target_date candle is captured
         df = yf.download(ticker, period="5d", interval="1d", progress=False)
         if df.empty:
             return None
@@ -163,14 +162,17 @@ def fetch_market_close_actuals(ticker: str, target_date_str: str) -> Optional[Di
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # Match date string in index
         df.index = pd.to_datetime(df.index)
-        
-        # Match exact date or latest available bar if market just closed
         matching_rows = df[df.index.strftime('%Y-%m-%d') == target_date_str]
 
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
+        now = datetime.datetime.now()
+
         if matching_rows.empty:
-            # Fallback to the latest available bar
+            # If target date is today and market has not opened yet (before 09:15 AM), do not fallback to yesterday
+            if target_date_str == today_str and (now.hour < 9 or (now.hour == 9 and now.minute < 15)):
+                return None
+            # Fallback to the latest available bar for past dates
             matching_rows = df.iloc[-1:]
 
         row = matching_rows.iloc[-1]
@@ -178,7 +180,6 @@ def fetch_market_close_actuals(ticker: str, target_date_str: str) -> Optional[Di
         close_price = _to_scalar(row['Close'])
         high_price = _to_scalar(row['High'])
         low_price = _to_scalar(row['Low'])
-
 
         actual_gain_pct = round(((close_price - open_price) / open_price) * 100, 2)
         max_gain_pct = round(((high_price - open_price) / open_price) * 100, 2)
@@ -229,11 +230,34 @@ def evaluate_intraday_trade_1m(
     ticker = normalize_ticker(ticker)
     target_price = round(entry_price + target_rupees, 2)
     stop_loss_price = round(entry_price - stop_loss_rupees, 2)
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    now = datetime.datetime.now()
+
+    # If target date is today and market has not opened yet (before 09:15 AM IST)
+    if target_date_str == today_str and (now.hour < 9 or (now.hour == 9 and now.minute < 15)):
+        return {
+            'ticker': ticker,
+            'entry_price': entry_price,
+            'exit_price': entry_price,
+            'high_price': entry_price,
+            'low_price': entry_price,
+            'close_price': entry_price,
+            'exit_reason': "MARKET_NOT_OPEN_YET",
+            'exit_time': "PENDING (Open @ 09:15)",
+            'pnl_per_share': 0.0
+        }
 
     df_1m = fetch_intraday_1m_data(ticker)
     
-    if df_1m.empty:
-        # Fallback to standard close actuals if 1-minute data is unavailable
+    # Filter 1m bars for target date
+    if not df_1m.empty:
+        df_1m.index = pd.to_datetime(df_1m.index)
+        matching_bars = df_1m[df_1m.index.strftime('%Y-%m-%d') == target_date_str]
+    else:
+        matching_bars = pd.DataFrame()
+
+    if matching_bars.empty:
+        # Check daily actuals for past dates
         daily_actuals = fetch_market_close_actuals(ticker, target_date_str)
         if daily_actuals:
             close_p = daily_actuals['close_price']
@@ -262,13 +286,19 @@ def evaluate_intraday_trade_1m(
                 'exit_time': 'EOD',
                 'pnl_per_share': pnl_per_share
             }
-
-    # Filter 1m bars for target date if available
-    df_1m.index = pd.to_datetime(df_1m.index)
-    matching_bars = df_1m[df_1m.index.strftime('%Y-%m-%d') == target_date_str]
-    if matching_bars.empty:
-        # Fall back to latest available session bars
-        matching_bars = df_1m
+        else:
+            # Session pending or no bars recorded yet
+            return {
+                'ticker': ticker,
+                'entry_price': entry_price,
+                'exit_price': entry_price,
+                'high_price': entry_price,
+                'low_price': entry_price,
+                'close_price': entry_price,
+                'exit_reason': "SESSION_PENDING",
+                'exit_time': "PENDING",
+                'pnl_per_share': 0.0
+            }
 
     exit_price = None
     exit_reason = "MARKET_CLOSE"
@@ -321,4 +351,5 @@ def evaluate_intraday_trade_1m(
         'exit_time': exit_time,
         'pnl_per_share': pnl_per_share
     }
+
 

@@ -1,11 +1,11 @@
 name: Stock AI Predictor Automated Scheduler
 
 on:
-  schedule:
-    # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction & 1-Minute Live Monitoring Session
-    - cron: '45 3 * * 1-5'
-    # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Report & ML Retraining Backup
-    - cron: '00 11 * * 1-5'
+  # schedule:
+  #   # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction & 1-Minute Live Monitoring Session
+  #   - cron: '45 3 * * 1-5'
+  #   # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Report & ML Retraining Backup
+  #   - cron: '00 11 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:

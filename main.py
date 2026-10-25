@@ -44,7 +44,9 @@ def run_train_initial():
     mae, samples_count = predictor.train_baseline(DEFAULT_TECH_TICKERS)
     print(f"🎉 Initial model successfully trained on {samples_count} historical samples (MAE: {mae:.4f}).")
 
-def run_morning_mode(date_str: str, send_telegram: bool = False):
+from typing import Optional
+
+def run_morning_mode(date_str: str, send_telegram: bool = False, target_chat_id: Optional[str] = None):
     print(f"🌅 Running Morning Analysis for Top Indian Stocks under ₹500 ({date_str})...")
     init_db()
     predictor = TechStockPredictor()
@@ -68,10 +70,10 @@ def run_morning_mode(date_str: str, send_telegram: bool = False):
 
     if send_telegram:
         print("📤 Sending Morning Report to Telegram Channel...")
-        send_telegram_message(report)
+        send_telegram_message(report, target_chat_id=target_chat_id)
     return report
 
-def run_evening_mode(date_str: str, send_telegram: bool = True):
+def run_evening_mode(date_str: str, send_telegram: bool = True, target_chat_id: Optional[str] = None):
     print(f"🌆 Running Evening Post-Market Close Analysis & ML Retraining for {date_str}...")
     init_db()
     predictor = TechStockPredictor()
@@ -89,7 +91,7 @@ def run_evening_mode(date_str: str, send_telegram: bool = True):
     # Send Evening Report to Telegram channel (User explicitly requested detailed evening report to telegram)
     if send_telegram:
         print("📤 Sending Detailed Evening Report to Telegram Channel...")
-        send_telegram_message(report)
+        send_telegram_message(report, target_chat_id=target_chat_id)
     return report
 
 def main():

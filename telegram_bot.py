@@ -191,7 +191,7 @@ def _execute_morning_command(chat_id: str):
         target_chat_id=chat_id
     )
     try:
-        main.run_morning_mode(date_str, send_telegram=True)
+        main.run_morning_mode(date_str, send_telegram=True, target_chat_id=chat_id)
     except Exception as e:
         send_telegram_message(f"❌ Error during morning prediction: {e}", target_chat_id=chat_id)
 
@@ -205,7 +205,7 @@ def _execute_evening_command(chat_id: str):
         target_chat_id=chat_id
     )
     try:
-        main.run_evening_mode(date_str, send_telegram=True)
+        main.run_evening_mode(date_str, send_telegram=True, target_chat_id=chat_id)
     except Exception as e:
         send_telegram_message(f"❌ Error during evening analysis: {e}", target_chat_id=chat_id)
 
@@ -358,6 +358,21 @@ def handle_telegram_message(msg: dict):
                 )
             else:
                 send_telegram_message("❌ Invalid key format. Please check your Gemini API key.", target_chat_id=chat_id)
+
+    else:
+        # Fallback for unrecognized messages or casual chat
+        fallback_msg = (
+            f"🤖 *Received:* `{text}`\n\n"
+            "Here are the available actions:\n"
+            "• 🌅 `/morning` — Run Morning Prediction (< ₹500)\n"
+            "• 📊 `/status` — View Pipeline & AI Status\n"
+            "• 🌐 `/news` — US & Singapore Cues + News\n"
+            "• 🌆 `/evening` — Evening P&L & Retraining\n"
+            "• ▶️ `/start_pipeline` — Activate Daily Auto Schedule\n"
+            "• ⏸️ `/stop_pipeline` — Pause Daily Schedule\n\n"
+            "👇 *Or simply tap any button below:*"
+        )
+        send_telegram_message(fallback_msg, target_chat_id=chat_id, reply_markup=get_control_panel_inline_markup())
 
 def run_telegram_listener():
     """

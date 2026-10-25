@@ -1,6 +1,11 @@
 name: Stock AI Predictor Automated Scheduler
 
 on:
+  schedule:
+    # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction & Market Session
+    - cron: '45 3 * * 1-5'
+    # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Report & ML Retraining
+    - cron: '00 11 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
@@ -15,6 +20,8 @@ on:
           - full-cycle
           - train-initial
           - test-telegram
+  repository_dispatch:
+    types: [telegram-command, morning, evening, monitor, full-cycle]
 
 jobs:
   run-stock-ai:
@@ -36,15 +43,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Determine Mode from Schedule
+      - name: Determine Mode from Schedule or Dispatch
         id: select_mode
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            DISPATCH_MODE="${{ github.event.client_payload.mode || github.event.action }}"
+            echo "mode=${DISPATCH_MODE:-morning}" >> $GITHUB_OUTPUT
           else
             HOUR=$(date -u +%H)
             if [ "$HOUR" -lt "8" ]; then
-              echo "mode=morning" >> $GITHUB_OUTPUT
+              echo "mode=full-cycle" >> $GITHUB_OUTPUT
             else
               echo "mode=evening" >> $GITHUB_OUTPUT
             fi
@@ -61,7 +71,7 @@ jobs:
         run: |
           MODE="${{ steps.select_mode.outputs.mode }}"
           echo "🚀 Executing Stock AI in mode: $MODE"
-          if [ "$MODE" = "morning" ]; then
+          if [ "$MODE" = "full-cycle" ]; then
             # 1. Generate morning predictions (< ₹500 stocks, ₹25k allocation)
             python main.py --mode morning --send-telegram
             
@@ -72,8 +82,12 @@ jobs:
             # 3. Generate final evening P&L report after market close
             echo "🌆 Market session ended. Generating evening P&L report..."
             python main.py --mode evening
+          elif [ "$MODE" = "morning" ]; then
+            python main.py --mode morning --send-telegram
           elif [ "$MODE" = "evening" ]; then
             python main.py --mode evening
+          elif [ "$MODE" = "monitor" ]; then
+            python main.py --mode monitor
           else
             python main.py --mode "$MODE" --send-telegram
           fi

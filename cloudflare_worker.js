@@ -78,7 +78,7 @@ async function handleTelegramUpdate(update, env) {
       '💡 *Your computer does NOT need to be on.*',
       env
     );
-    await triggerGitHubWorkflow(env, 'morning');
+    await triggerGitHubWorkflow(chatId, env, 'morning');
   } else if (cmd === '/evening') {
     await sendTelegramMessage(
       chatId,
@@ -89,7 +89,7 @@ async function handleTelegramUpdate(update, env) {
       '• Report will arrive here shortly.',
       env
     );
-    await triggerGitHubWorkflow(env, 'evening');
+    await triggerGitHubWorkflow(chatId, env, 'evening');
   } else if (cmd === '/full_cycle') {
     await sendTelegramMessage(
       chatId,
@@ -97,7 +97,7 @@ async function handleTelegramUpdate(update, env) {
       'Morning Prediction + 1-minute monitoring until 3:30 PM + Evening Report.',
       env
     );
-    await triggerGitHubWorkflow(env, 'full-cycle');
+    await triggerGitHubWorkflow(chatId, env, 'full-cycle');
   } else if (cmd === '/status') {
     await checkGitHubActionsStatus(chatId, env);
   } else {
@@ -105,32 +105,65 @@ async function handleTelegramUpdate(update, env) {
   }
 }
 
-async function triggerGitHubWorkflow(env, mode) {
+async function triggerGitHubWorkflow(chatId, env, mode) {
+  if (!env.GITHUB_TOKEN) {
+    await sendTelegramMessage(
+      chatId,
+      '⚠️ *GITHUB_TOKEN is missing in Cloudflare Secrets!*\n' +
+      'Please go to Cloudflare Dashboard ➔ Settings ➔ Variables and Secrets ➔ Add GITHUB_TOKEN (your GitHub Personal Access Token).',
+      env
+    );
+    return false;
+  }
+
   const owner = env.GITHUB_OWNER || 'JagadeeshVedula';
   const repo = env.GITHUB_REPO || 'TradePrediction';
   const workflow = env.GITHUB_WORKFLOW || 'stock_scheduler.yml';
 
   const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'Cloudflare-Telegram-Relay',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      ref: 'main',
-      inputs: { mode: mode }
-    })
-  });
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.GITHUB_TOKEN.trim()}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'Cloudflare-Telegram-Relay',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ref: 'main',
+        inputs: { mode: mode }
+      })
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`GitHub API error (${response.status}):`, errorText);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`GitHub API error (${response.status}):`, errorText);
+      await sendTelegramMessage(
+        chatId,
+        `❌ *GitHub Actions Trigger Error (HTTP ${response.status})*\n` +
+        `Details: \`${errorText.slice(0, 200)}\`\n\n` +
+        `💡 Ensure your \`GITHUB_TOKEN\` in Cloudflare has \`repo\` and \`workflow\` scope enabled.`,
+        env
+      );
+      return false;
+    }
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ *GitHub Actions Workflow Dispatched!* 🚀\n` +
+      `• *Mode:* \`${mode}\`\n` +
+      `• *Workflow:* \`${workflow}\`\n` +
+      `• *Cloud Runner:* Active\n\n` +
+      `The AI report will be delivered here once processing completes (~1-2 mins).`,
+      env
+    );
+    return true;
+  } catch (err) {
+    await sendTelegramMessage(chatId, `❌ Network error contacting GitHub: ${err.message}`, env);
+    return false;
   }
-  return response.ok;
 }
 
 async function checkGitHubActionsStatus(chatId, env) {

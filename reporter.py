@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from config import PROFIT_TARGET_INR, STOP_LOSS_INR
 
@@ -6,12 +6,45 @@ def _get_curr_symbol(ticker: str) -> str:
     """Return ₹ for Indian stocks (default currency)."""
     return "₹"
 
-def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, Any]]) -> str:
+def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, Any]], market_context: Optional[Dict[str, Any]] = None) -> str:
     """Generate detailed Morning Report formatted for Telegram and console."""
     lines = []
     lines.append(f"🌅 *TOP 5 INDIAN STOCKS (< ₹500) GAIN PREDICTION* 🚀")
     lines.append(f"📅 *Date:* {date_str} | *NSE Intraday Trading Strategy*")
     lines.append("───────────────────────────")
+    
+    # Global Cues & News Sentiment block if available
+    if market_context:
+        tone = market_context.get("overall_tone", "NEUTRAL")
+        tone_badge = "🟢 BULLISH" if tone == "BULLISH" else ("🔴 BEARISH" if tone == "BEARISH" else "🟡 MIXED/NEUTRAL")
+        lines.append(f"🌐 *GLOBAL CUES (US & SINGAPORE):* {tone_badge}")
+        
+        # Format US & Singapore stats
+        us_cues = market_context.get("global_cues", {}).get("us_markets", {})
+        asian_cues = market_context.get("global_cues", {}).get("asian_markets", {})
+        
+        cue_parts = []
+        for name in ["S&P 500", "Nasdaq", "Dow Jones"]:
+            if name in us_cues:
+                st = us_cues[name]
+                s_icon = "🟢" if st['change_pct'] >= 0 else "🔴"
+                cue_parts.append(f"{s_icon} {name} {st['change_pct']:+.2f}%")
+        
+        if "Singapore Straits Times" in asian_cues:
+            st = asian_cues["Singapore Straits Times"]
+            s_icon = "🟢" if st['change_pct'] >= 0 else "🔴"
+            cue_parts.append(f"{s_icon} SGX/STI {st['change_pct']:+.2f}%")
+            
+        if cue_parts:
+            lines.append("  • " + " | ".join(cue_parts))
+            
+        news_items = market_context.get("news_items", [])
+        if news_items:
+            lines.append(f"📰 *Moneycontrol / TOI Pulse:* _{news_items[0]['title']}_")
+            
+        lines.append("🧠 *AI Engine:* Google Gemini + Technical Ensemble Fusion")
+        lines.append("───────────────────────────")
+
     lines.append("💼 *Investment Rules:* Assumed ₹25,000 on each stock (Total: ₹1,25,000)")
     lines.append(f"🎯 *Exit Strategy:* Pre-10:00 AM Sell on +₹10.00 | Post-10:00 AM Target +₹{PROFIT_TARGET_INR:.2f} / Stop Loss -₹{STOP_LOSS_INR:.2f}")
     lines.append("───────────────────────────")
@@ -31,6 +64,9 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         inv_amt = item.get('invested_amount', round(qty * start_p, 2))
         total_allocated += inv_amt
         reasons = item.get('signal_reasons', 'Bullish Technical Momentum')
+        is_gemini = item.get('gemini_selected', False)
+        
+        conf_badge = f"{conf:.1f}% 🔥" if conf >= 85 else f"{conf:.1f}%"
 
         lines.append(f"*{rank}. {ticker}* 📈")
         lines.append(f"  • *Entry Price:* {curr}{start_p:.2f} (< ₹500)")
@@ -38,7 +74,7 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         lines.append(f"  • *Capital Invested:* {curr}{inv_amt:,.2f}")
         lines.append(f"  • *Target Sell Price:* {curr}{target_p:.2f} (+₹{PROFIT_TARGET_INR:.2f})")
         lines.append(f"  • *Stop Loss Price:* {curr}{stop_l:.2f} (-₹{STOP_LOSS_INR:.2f})")
-        lines.append(f"  • *AI Confidence:* {conf:.1f}%")
+        lines.append(f"  • *AI Confidence:* {conf_badge}")
         lines.append(f"  • *Key Signals:* _{reasons}_")
         lines.append("")
 

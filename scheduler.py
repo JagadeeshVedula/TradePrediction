@@ -11,6 +11,8 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
 
 
 from zoneinfo import ZoneInfo
+from pipeline_state import is_pipeline_enabled
+from telegram_bot import start_telegram_bot_background
 
 def is_market_day() -> bool:
     """Check if today is a weekday (Monday-Friday) in IST."""
@@ -29,14 +31,19 @@ def start_scheduler():
     """Daily scheduler loop monitoring market hours in IST."""
     ist = ZoneInfo("Asia/Kolkata")
     print("⏰ Indian Stock Trading AI Scheduler Started (< ₹500 Universe)...")
-    print("  • Scheduled Morning Prediction Run: 09:15 AM IST")
-    print("  • Intraday 1-Minute Live Monitoring: 09:15 AM - 03:30 PM IST (Pre-10 AM: +₹10 | Post-10 AM Target: +₹2 / Stop Loss: -₹1)")
+    print("  • Scheduled Morning Prediction Run: 09:15 AM IST (Gemini AI + Global Cues)")
+    print("  • Intraday 1-Minute Live Monitoring: 09:15 AM - 03:30 PM IST")
     print("  • Scheduled Evening Report & Retraining Run: 04:30 PM IST")
+    print("  • Interactive Telegram Bot: Listening for /morning, /start_pipeline, /stop_pipeline, /status")
     print("Press Ctrl+C to exit.\n")
+
+    # Start interactive Telegram Bot in background daemon thread
+    start_telegram_bot_background()
 
     morning_executed_today = False
     evening_executed_today = False
     current_day = datetime.datetime.now(ist).date()
+    last_stop_notice_time = 0
 
     while True:
         now = datetime.datetime.now(ist)
@@ -47,6 +54,15 @@ def start_scheduler():
             current_day = today
             morning_executed_today = False
             evening_executed_today = False
+
+        pipeline_active = is_pipeline_enabled()
+
+        if not pipeline_active:
+            if time.time() - last_stop_notice_time > 300: # Every 5 minutes
+                print(f"⏸️ [{now.strftime('%H:%M:%S IST')}] Pipeline is currently PAUSED via Telegram (/stop_pipeline). Send /start_pipeline to resume.")
+                last_stop_notice_time = time.time()
+            time.sleep(30)
+            continue
 
         if is_market_day():
             # Morning trigger around 09:15 AM IST

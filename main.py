@@ -20,9 +20,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Top 5 Indian Stocks (< ₹500) Gain Predictor & Intraday 1m Tracker System")
     parser.add_argument(
         "--mode",
-        choices=["morning", "evening", "monitor", "train-initial", "test-telegram", "get-chats", "full-cycle"],
+        choices=["morning", "evening", "monitor", "train-initial", "test-telegram", "get-chats", "full-cycle", "telegram-bot", "news"],
         default="morning",
-        help="Operation mode: 'morning' (predictions), 'evening' (P&L report & retraining), 'monitor' (1m intraday tracker), 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle'"
+        help="Operation mode: 'morning' (predictions), 'evening' (P&L report & retraining), 'monitor' (1m intraday tracker), 'telegram-bot' (interactive bot), 'news', 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle'"
     )
     parser.add_argument(
         "--date",
@@ -58,13 +58,18 @@ def run_morning_mode(date_str: str, send_telegram: bool = False):
     save_predictions(date_str, top_5)
     print(f"💾 Top 5 predictions (< ₹500) saved to database for date {date_str}.")
 
-    # Generate Morning Report
-    report = generate_morning_report_markdown(date_str, top_5)
+    # Generate Morning Report with Global Cues and Gemini Insights
+    report = generate_morning_report_markdown(
+        date_str,
+        top_5,
+        market_context=getattr(predictor, 'last_market_context', None)
+    )
     print("\n" + report + "\n")
 
     if send_telegram:
         print("📤 Sending Morning Report to Telegram Channel...")
         send_telegram_message(report)
+    return report
 
 def run_evening_mode(date_str: str, send_telegram: bool = True):
     print(f"🌆 Running Evening Post-Market Close Analysis & ML Retraining for {date_str}...")
@@ -85,6 +90,7 @@ def run_evening_mode(date_str: str, send_telegram: bool = True):
     if send_telegram:
         print("📤 Sending Detailed Evening Report to Telegram Channel...")
         send_telegram_message(report)
+    return report
 
 def main():
     args = parse_args()
@@ -104,6 +110,17 @@ def main():
     elif args.mode == "get-chats":
         print("🔍 Fetching Telegram Chat & Group IDs...")
         get_telegram_chat_ids()
+    elif args.mode == "telegram-bot":
+        from telegram_bot import run_telegram_listener
+        print("🤖 Launching Standalone Interactive Telegram Bot Listener...")
+        run_telegram_listener()
+    elif args.mode == "news":
+        from market_news import get_market_context_summary
+        print("🌐 Fetching Global Market Cues & Pre-Market Financial News...")
+        ctx = get_market_context_summary()
+        print("\n" + ctx.get("summary_text", ""))
+        print("\n📰 Domestic News Headlines:")
+        print(ctx.get("formatted_news_text", ""))
     elif args.mode == "full-cycle":
         print("🔄 Executing Full-Cycle (Morning Analysis + Evening Close Retraining)...")
         run_morning_mode(date_str, send_telegram=False)

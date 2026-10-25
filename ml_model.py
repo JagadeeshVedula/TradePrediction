@@ -36,12 +36,15 @@ from database import (
     get_all_matched_records,
     get_supabase_client
 )
+from market_news import get_market_context_summary, fetch_stock_specific_news
+from gemini_analyzer import analyze_and_rank_predictions_with_gemini, is_gemini_configured
 
 class TechStockPredictor:
     def __init__(self):
         self.model_rf = None
         self.model_gb = None
         self.scaler = None
+        self.last_market_context = None
         self.load_model()
 
     def load_model(self):
@@ -154,7 +157,7 @@ class TechStockPredictor:
         return ", ".join(reasons) if reasons else "Positive Technical Structure"
 
     def predict_top_5_gainers(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        """Analyze Indian stock universe and predict Top 5 expected gainers priced under Rs. 500."""
+        """Analyze Indian stock universe and predict Top 5 expected gainers priced under Rs. 500 with Gemini AI."""
         if not self.model_rf or not self.scaler:
             print("⚠️ No pre-trained model found. Training initial model baseline...")
             self.train_baseline(tickers)
@@ -176,7 +179,6 @@ class TechStockPredictor:
             if starting_price >= MAX_STOCK_PRICE or starting_price <= 0:
                 continue
 
-
             features = data['features']
             feature_df = pd.DataFrame([features])[FEATURE_COLUMNS]
             scaled_features = self.scaler.transform(feature_df)
@@ -195,7 +197,7 @@ class TechStockPredictor:
 
             target_gain_pct = round(max(expected_gain, DEFAULT_GAIN_TARGET_PCT), 2)
             
-            # User strategy: Exit if stock increases 1 rupee or decreases 3 rupees
+            # User strategy: Exit if stock increases target rupees or decreases stop loss rupees
             target_price = round(starting_price + PROFIT_TARGET_INR, 2)
             stop_loss = round(starting_price - STOP_LOSS_INR, 2)
 
@@ -212,12 +214,27 @@ class TechStockPredictor:
                 'confidence_score': round(confidence, 1),
                 'quantity': quantity,
                 'invested_amount': invested_amount,
+                'features': features,
                 'signal_reasons': self._generate_signal_reason(features)
             })
 
-        # Sort by expected gain % descending and pick Top 5
+        if not results:
+            return []
+
+        # Sort by expected gain % descending and pick Top 12 candidates for deep AI evaluation
         results.sort(key=lambda x: (x['expected_gain_pct'], x['confidence_score']), reverse=True)
-        top_5 = results[:TOP_N_PREDICTIONS]
+        top_candidates = results[:12]
+
+        print("🌐 Fetching Global Market Cues (US & Singapore) and Financial News (Moneycontrol & Times of India)...")
+        market_context = get_market_context_summary()
+        self.last_market_context = market_context
+
+        # Fetch recent company-specific news for each candidate
+        for cand in top_candidates:
+            cand['recent_news'] = fetch_stock_specific_news(cand['ticker'], max_items=2)
+
+        # Call Gemini AI to analyze global cues + news sentiment + technicals and select the Top 5
+        top_5 = analyze_and_rank_predictions_with_gemini(top_candidates, market_context)
 
         for rank, item in enumerate(top_5, start=1):
             item['rank'] = rank

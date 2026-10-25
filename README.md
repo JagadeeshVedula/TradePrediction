@@ -8,29 +8,27 @@ Hosted on **Supabase (PostgreSQL Database & Storage)** and scheduled via **GitHu
 
 ## 🌟 Key Features
 
-1. **🌅 Morning Market Analysis**:
-   - Downloads real-time & intraday indicators for top Indian stock universe (`INFY.NS`, `TCS.NS`, `RELIANCE.NS`, `HDFCBANK.NS`, `WIPRO.NS`, `BHARTIARTL.NS`, `SBIN.NS`, `LT.NS`, etc.).
-   - Predicts the **Top 5 expected Indian gainers** for the NSE/BSE market session.
-   - Calculates target prices (in ₹), stop-loss thresholds, confidence scores, and key technical indicators driving the recommendation.
+1. **🌅 Morning Market Analysis with Google Gemini AI**:
+   - Downloads real-time & intraday indicators for Indian stocks priced under ₹500 (`TATASTEEL.NS`, `WIPRO.NS`, `IOC.NS`, `EXIDEIND.NS`, `PNB.NS`, `SJVN.NS`, etc.).
+   - Gathers **Global Market Cues**: Previous day US market close (S&P 500, Nasdaq, Dow Jones) and Singapore/Asian markets (Singapore Straits Times, Nikkei 225).
+   - Scrapes live financial news from **Moneycontrol** & **Times of India** pre-market feeds.
+   - Leverages **Google Gemini 2.5 Flash AI** to combine macroeconomic cues, domestic news catalysts, and technical indicators to pick the **Top 5 highest confidence stocks**.
+   - Calculates target prices (+₹2.00 / pre-10am +₹10.00), stop losses (-₹1.00), and capital allocations (₹25,000 per stock).
 
 2. **🌆 Evening Close Analysis**:
-   - Downloads post-close actual market prices (Open, Close, High, Low).
-   - Computes actual raise/fall percentages and evaluates whether target prices were met.
+   - Downloads post-close actual market prices and 1-minute tick actions.
+   - Computes share-by-share profit and loss breakdown against morning predictions.
+   - Evaluates whether targets (+₹2/+₹10) or stop losses (-₹1) were triggered.
 
-3. **🧠 Continuous Retraining & Strategy Feedback Loop**:
-   - Stores all predictions and actual outcome results into Supabase Cloud Database (`predictions`, `outcomes`, `model_retraining_log` tables).
-   - Syncs trained ML ensemble models (`stock_model.pkl` + `scaler.pkl`) directly to Supabase Storage (`ml-models` bucket).
-   - Dynamically adapts feature weights for next day's market predictions.
-
-4. **☁️ Zero Local Machine Dependency (Hosted on Cloud)**:
-   - Powered by **GitHub Actions** workflows running on cloud runners twice daily:
-     - **Morning Analysis**: 09:15 AM IST (03:45 UTC) Mon-Fri
-     - **Evening Close Report & Retraining**: 04:30 PM IST (11:00 UTC) Mon-Fri
-   - Zero local server or PC needs to be left on.
-
-5. **📲 Telegram Channel Integration**:
-   - Formats clean, rich markdown reports with visual emojis (📈, 📉, 🎯, 🟢, 🔴).
-   - Posts detailed morning & post-close performance reports directly to your Telegram Channel.
+3. **🤖 Interactive Telegram Bot with Start/Stop Pipeline Controls**:
+   - `/morning` — Trigger Morning Predictions immediately with Gemini AI & Global News analysis.
+   - `/evening` — Trigger Evening Post-Market P&L Report & Retraining.
+   - `/start_pipeline` — Start/Resume automated daily trading scheduler.
+   - `/stop_pipeline` — Pause/Stop automated trading pipeline.
+   - `/status` — View pipeline running state & Gemini AI connection status.
+   - `/news` — Live US & Singapore market cues + Moneycontrol & TOI headlines.
+   - `/set_key <API_KEY>` — Set or update your Google Gemini API key directly from Telegram!
+   - `/help` — View commands guide with Telegram autocomplete support.
 
 ---
 

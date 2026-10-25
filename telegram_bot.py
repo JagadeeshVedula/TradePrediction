@@ -49,7 +49,7 @@ def update_gemini_api_key(new_key: str) -> bool:
         print(f"Error saving Gemini key to .env: {e}")
         return False
 
-def send_telegram_message(text: str, target_chat_id: Optional[str] = None) -> bool:
+def send_telegram_message(text: str, target_chat_id: Optional[str] = None, reply_markup: Optional[Dict[str, Any]] = None) -> bool:
     """Send formatted text message to Telegram channel, group, or user chat."""
     if not TELEGRAM_BOT_TOKEN:
         print("⚠️ Telegram Bot Token not configured in .env file.")
@@ -71,12 +71,15 @@ def send_telegram_message(text: str, target_chat_id: Optional[str] = None) -> bo
         # Split text into chunks if it exceeds Telegram's 4096 char limit
         chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)] if len(text) > 4000 else [text]
 
-        for chunk in chunks:
+        for idx, chunk in enumerate(chunks):
             payload = {
                 "chat_id": chat_id,
                 "text": chunk,
                 "parse_mode": "Markdown"
             }
+            # Only attach reply_markup to the last chunk
+            if reply_markup and idx == len(chunks) - 1:
+                payload["reply_markup"] = reply_markup
 
             try:
                 response = requests.post(url, json=payload, timeout=12)
@@ -97,24 +100,84 @@ def send_telegram_message(text: str, target_chat_id: Optional[str] = None) -> bo
 
     return overall_success
 
+def get_control_panel_inline_markup() -> Dict[str, Any]:
+    """Clickable inline buttons attached directly to messages."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🌅 Run Morning Prediction", "callback_data": "/morning"},
+                {"text": "📊 Pipeline Status", "callback_data": "/status"}
+            ],
+            [
+                {"text": "▶️ Start Pipeline", "callback_data": "/start_pipeline"},
+                {"text": "⏸️ Stop Pipeline", "callback_data": "/stop_pipeline"}
+            ],
+            [
+                {"text": "🌐 Global News & Cues", "callback_data": "/news"},
+                {"text": "🌆 Evening P&L Report", "callback_data": "/evening"}
+            ]
+        ]
+    }
+
+def get_persistent_reply_keyboard_markup() -> Dict[str, Any]:
+    """Persistent big buttons docked at the bottom of the chat window."""
+    return {
+        "keyboard": [
+            [{"text": "🌅 Morning Prediction"}, {"text": "📊 Status"}],
+            [{"text": "▶️ Start Pipeline"}, {"text": "⏸️ Stop Pipeline"}],
+            [{"text": "🌐 Market News"}, {"text": "🌆 Evening Report"}]
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True
+    }
+
+def send_control_panel(chat_id: str):
+    """Send interactive control panel with clickable buttons to user."""
+    panel_text = (
+        "🎛️ *INDIAN STOCK AI TRADING CONTROL PANEL* 🚀\n"
+        "───────────────────────────\n"
+        "Use the buttons below to operate the automated trading pipeline:\n\n"
+        "• 🌅 *Run Morning Prediction*: Analyze Indian stocks (< ₹500) with Gemini AI & Global News\n"
+        "• ▶️ *Start Pipeline*: Activate automated schedule (9:15 AM - 3:30 PM IST)\n"
+        "• ⏸️ *Stop Pipeline*: Pause automated trading\n"
+        "• 📊 *Pipeline Status*: View active state & Gemini connection\n"
+        "• 🌐 *Market News*: Live US & Singapore cues + Moneycontrol/TOI headlines\n"
+        "• 🌆 *Evening Report*: Post-market close P&L breakdown per share\n"
+        "───────────────────────────\n"
+        "💡 *Tap any button below to trigger actions immediately!*"
+    )
+    # Send with inline keyboard
+    send_telegram_message(panel_text, target_chat_id=chat_id, reply_markup=get_control_panel_inline_markup())
+    # Also send persistent reply keyboard so big buttons remain docked at bottom of chat
+    quick_bar = "👇 *Menu controls are also docked on your keyboard below:*"
+    send_telegram_message(quick_bar, target_chat_id=chat_id, reply_markup=get_persistent_reply_keyboard_markup())
+
 def register_bot_commands() -> bool:
-    """Register slash commands in Telegram so they show up in the autocomplete menu."""
+    """Register slash commands and menu button in Telegram for all chat types."""
     if not TELEGRAM_BOT_TOKEN:
         return False
     commands = [
-        {"command": "morning", "description": "Run Morning Prediction with Gemini AI & News (< ₹500)"},
-        {"command": "evening", "description": "Run Evening P&L Report & Retraining"},
-        {"command": "status", "description": "Check Pipeline & Gemini Connection Status"},
-        {"command": "start_pipeline", "description": "Start/Resume Automated Trading Scheduler"},
-        {"command": "stop_pipeline", "description": "Pause/Stop Automated Trading Scheduler"},
-        {"command": "news", "description": "View US, Singapore Cues & Moneycontrol/TOI News"},
-        {"command": "help", "description": "Show Help & Command Guide"}
+        {"command": "morning", "description": "🌅 Run Morning Prediction (< ₹500) with Gemini"},
+        {"command": "start_pipeline", "description": "▶️ Start Automated Daily Trading Pipeline"},
+        {"command": "stop_pipeline", "description": "⏸️ Stop/Pause Daily Trading Pipeline"},
+        {"command": "status", "description": "📊 Check Pipeline State & Gemini Status"},
+        {"command": "news", "description": "🌐 View US/Singapore Cues & Market News"},
+        {"command": "evening", "description": "🌆 Run Evening P&L Report & Retraining"},
+        {"command": "menu", "description": "🎛️ Open Control Panel with Clickable Buttons"},
+        {"command": "help", "description": "❓ Show Help & Commands Guide"}
     ]
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands"
-        res = requests.post(url, json={"commands": commands}, timeout=10)
-        return bool(res.status_code == 200 and res.json().get("ok"))
-    except Exception:
+        # Default scope
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands", json={"commands": commands}, timeout=10)
+        # Private chats
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands", json={"commands": commands, "scope": {"type": "all_private_chats"}}, timeout=10)
+        # Group chats
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands", json={"commands": commands, "scope": {"type": "all_group_chats"}}, timeout=10)
+        # Menu button
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setChatMenuButton", json={"menu_button": {"type": "commands"}}, timeout=10)
+        return True
+    except Exception as e:
+        print(f"Notice: Failed registering Telegram commands: {e}")
         return False
 
 def _execute_morning_command(chat_id: str):
@@ -169,6 +232,26 @@ def _execute_news_command(chat_id: str):
     except Exception as e:
         send_telegram_message(f"❌ Error fetching news cues: {e}", target_chat_id=chat_id)
 
+def handle_telegram_callback_query(cq: dict):
+    """Handle click events on inline keyboard buttons."""
+    cq_id = cq.get("id")
+    from_user = cq.get("from", {})
+    msg = cq.get("message", {})
+    chat_id = str(msg.get("chat", {}).get("id"))
+    data = cq.get("data", "").strip()
+
+    # Acknowledge callback to stop loading spinner in Telegram
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id, "text": f"Executing {data}..."}
+        )
+    except Exception:
+        pass
+
+    # Treat callback_data as command
+    handle_telegram_message({"chat": {"id": chat_id}, "text": data})
+
 def handle_telegram_message(msg: dict):
     """Handle an incoming message update from Telegram."""
     chat = msg.get("chat", {})
@@ -178,28 +261,31 @@ def handle_telegram_message(msg: dict):
     if not text:
         return
 
-    # Extract command
+    # Extract command or text button
     parts = text.split()
     raw_cmd = parts[0].lower()
-    # Handle bot username suffix in commands (e.g. /morning@MyBot)
     cmd = raw_cmd.split("@")[0]
     args = parts[1:]
 
-    if cmd in ["/start", "/help"]:
-        help_text = (
-            "🤖 *Top Indian Stocks AI Trading Assistant (< ₹500)* 🚀\n\n"
-            "Here are the available commands you can use:\n\n"
-            "🌅 `/morning` — Trigger Morning Predictions immediately with Gemini AI & Global News analysis\n"
-            "🌆 `/evening` — Trigger Evening Post-Market P&L Report & Retraining\n"
-            "🌐 `/news` — View live US & Singapore market cues + Moneycontrol/TOI headlines\n"
-            "📊 `/status` — Check Pipeline running state & Gemini AI connection\n"
-            "▶️ `/start_pipeline` — Start/Resume daily automated trading scheduler (9:15 AM - 3:30 PM)\n"
-            "⏸️ `/stop_pipeline` — Pause/Stop daily automated scheduler\n"
-            "🔑 `/set_key <API_KEY>` — Set or update your Google Gemini API key\n"
-            "❓ `/help` — Show this guide\n\n"
-            "💡 *Tip:* You can click any command above or type `/morning` to test predictions anytime!"
-        )
-        send_telegram_message(help_text, target_chat_id=chat_id)
+    # Support button labels from persistent keyboard
+    clean_lower = text.lower()
+    if "morning" in clean_lower and not cmd.startswith("/"):
+        cmd = "/morning"
+    elif "status" in clean_lower and not cmd.startswith("/"):
+        cmd = "/status"
+    elif "start pipeline" in clean_lower and not cmd.startswith("/"):
+        cmd = "/start_pipeline"
+    elif "stop pipeline" in clean_lower and not cmd.startswith("/"):
+        cmd = "/stop_pipeline"
+    elif "news" in clean_lower and not cmd.startswith("/"):
+        cmd = "/news"
+    elif "evening" in clean_lower and not cmd.startswith("/"):
+        cmd = "/evening"
+    elif "menu" in clean_lower and not cmd.startswith("/"):
+        cmd = "/menu"
+
+    if cmd in ["/start", "/help", "/menu"]:
+        send_control_panel(chat_id)
 
     elif cmd == "/morning":
         threading.Thread(target=_execute_morning_command, args=(chat_id,), daemon=True).start()
@@ -302,6 +388,8 @@ def run_telegram_listener():
                         offset = update["update_id"] + 1
                         if "message" in update:
                             handle_telegram_message(update["message"])
+                        elif "callback_query" in update:
+                            handle_telegram_callback_query(update["callback_query"])
             elif resp.status_code == 409:
                 print("⚠️ Another Telegram bot instance is running. Waiting 10s...")
                 time.sleep(10)

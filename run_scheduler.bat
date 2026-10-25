@@ -1,6 +1,6 @@
 @echo off
 title Top 5 Tech Stock Gainers Predictor & Scheduler
-cd /d "c:\Users\Jagadeesh\Documents\stock trading"
+cd /d "%~dp0"
 echo =======================================================
 echo 🚀 Stock Trading AI Predictor & Continuous Retrainer
 echo =======================================================

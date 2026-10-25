@@ -3,16 +3,32 @@
  * Handles requests for Cloudflare Pages deployments
  */
 
+const DEFAULT_BOT_TOKEN = "8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk";
+
 export async function onRequest(context) {
   const { request, env } = context;
+  const botToken = (env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN).trim();
+  const hasGithubToken = !!(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 5);
 
   if (request.method !== 'POST') {
-    return context.next();
+    const info = {
+      status: "Active",
+      message: "Telegram to GitHub Actions Relay is Active!",
+      has_TELEGRAM_BOT_TOKEN: true,
+      has_GITHUB_TOKEN: hasGithubToken,
+      github_owner: env.GITHUB_OWNER || "JagadeeshVedula",
+      github_repo: env.GITHUB_REPO || "TradePrediction",
+      github_workflow: env.GITHUB_WORKFLOW || "stock_scheduler.yml"
+    };
+    return new Response(JSON.stringify(info, null, 2), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 
   try {
     const update = await request.json();
-    await handleTelegramUpdate(update, env);
+    await handleTelegramUpdate(update, env, botToken);
     return new Response('OK', { status: 200 });
   } catch (err) {
     console.error('Error handling update:', err);
@@ -20,7 +36,7 @@ export async function onRequest(context) {
   }
 }
 
-async function handleTelegramUpdate(update, env) {
+async function handleTelegramUpdate(update, env, botToken) {
   let chatId = null;
   let text = '';
   let callbackQueryId = null;
@@ -34,11 +50,13 @@ async function handleTelegramUpdate(update, env) {
     text = (update.callback_query.data || '').trim();
 
     if (callbackQueryId) {
-      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callback_query_id: callbackQueryId, text: 'Triggering...' })
-      });
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: callbackQueryId, text: 'Executing...' })
+        });
+      } catch (e) {}
     }
   }
 
@@ -55,7 +73,7 @@ async function handleTelegramUpdate(update, env) {
   else if (cleanLower.includes('stop pipeline') && !cmd.startsWith('/')) cmd = '/stop_pipeline';
 
   if (cmd === '/start' || cmd === '/help' || cmd === '/menu') {
-    await sendControlPanel(chatId, env);
+    await sendControlPanel(chatId, env, botToken);
   } else if (cmd === '/morning') {
     await sendTelegramMessage(
       chatId,
@@ -65,9 +83,9 @@ async function handleTelegramUpdate(update, env) {
       '• Gemini AI will evaluate Top 5 Indian stocks (< ₹500).\n' +
       '• Full report will arrive directly in this chat in ~1-2 minutes!\n\n' +
       '💡 *Your computer does NOT need to be on.*',
-      env
+      botToken
     );
-    await triggerGitHubWorkflow(chatId, env, 'morning');
+    await triggerGitHubWorkflow(chatId, env, botToken, 'morning');
   } else if (cmd === '/evening') {
     await sendTelegramMessage(
       chatId,
@@ -76,31 +94,37 @@ async function handleTelegramUpdate(update, env) {
       '• GitHub Actions runner is executing post-close analysis...\n' +
       '• Intraday P&L (+₹2 / -₹1) and retraining will be processed.\n' +
       '• Report will arrive here shortly.',
-      env
+      botToken
     );
-    await triggerGitHubWorkflow(chatId, env, 'evening');
+    await triggerGitHubWorkflow(chatId, env, botToken, 'evening');
   } else if (cmd === '/full_cycle') {
     await sendTelegramMessage(
       chatId,
       '🔄 *Triggering Full Market Cycle in GitHub Actions!* ☁️\n' +
       'Morning Prediction + 1-minute monitoring until 3:30 PM + Evening Report.',
-      env
+      botToken
     );
-    await triggerGitHubWorkflow(chatId, env, 'full-cycle');
+    await triggerGitHubWorkflow(chatId, env, botToken, 'full-cycle');
   } else if (cmd === '/status') {
-    await checkGitHubActionsStatus(chatId, env);
+    await checkGitHubActionsStatus(chatId, env, botToken);
   } else {
-    await sendFallbackMenu(chatId, text, env);
+    await sendFallbackMenu(chatId, text, env, botToken);
   }
 }
 
-async function triggerGitHubWorkflow(chatId, env, mode) {
-  if (!env.GITHUB_TOKEN) {
+async function triggerGitHubWorkflow(chatId, env, botToken, mode) {
+  const githubToken = (env.GITHUB_TOKEN || '').trim();
+
+  if (!githubToken) {
     await sendTelegramMessage(
       chatId,
-      '⚠️ *GITHUB_TOKEN is missing in Cloudflare Secrets!*\n' +
-      'Please go to Cloudflare Dashboard ➔ Settings ➔ Variables and Secrets ➔ Add GITHUB_TOKEN (your GitHub Personal Access Token).',
-      env
+      '⚠️ *GITHUB_TOKEN is missing in Cloudflare Secrets!*\n\n' +
+      'To fix this:\n' +
+      '1. Open Cloudflare Dashboard ➔ Workers ➔ `tradeprediction` ➔ **Settings** ➔ **Variables and Secrets**.\n' +
+      '2. Add variable name: `GITHUB_TOKEN`\n' +
+      '3. Value: Your GitHub Personal Access Token (classic with `repo` and `workflow` checked).\n' +
+      '4. Click Deploy / Save.',
+      botToken
     );
     return false;
   }
@@ -115,7 +139,7 @@ async function triggerGitHubWorkflow(chatId, env, mode) {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${env.GITHUB_TOKEN.trim()}`,
+        'Authorization': `Bearer ${githubToken}`,
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'Cloudflare-Telegram-Relay',
         'Content-Type': 'application/json'
@@ -132,46 +156,49 @@ async function triggerGitHubWorkflow(chatId, env, mode) {
       await sendTelegramMessage(
         chatId,
         `❌ *GitHub Actions Trigger Error (HTTP ${response.status})*\n` +
-        `Details: \`${errorText.slice(0, 200)}\`\n\n` +
+        `Response: \`${errorText.slice(0, 200)}\`\n\n` +
         `💡 Ensure your \`GITHUB_TOKEN\` in Cloudflare has \`repo\` and \`workflow\` scope enabled.`,
-        env
+        botToken
       );
       return false;
     }
 
     await sendTelegramMessage(
       chatId,
-      `✅ *GitHub Actions Workflow Dispatched!* 🚀\n` +
+      `✅ *GitHub Actions Workflow Dispatched Successfully!* 🚀\n` +
       `• *Mode:* \`${mode}\`\n` +
       `• *Workflow:* \`${workflow}\`\n` +
-      `• *Cloud Runner:* Active\n\n` +
-      `The AI report will be delivered here once processing completes (~1-2 mins).`,
-      env
+      `• *Cloud Runner:* Started\n\n` +
+      `Your stock report will be delivered here once processing completes (~1-2 mins).`,
+      botToken
     );
     return true;
   } catch (err) {
-    await sendTelegramMessage(chatId, `❌ Network error contacting GitHub: ${err.message}`, env);
+    await sendTelegramMessage(chatId, `❌ Network error contacting GitHub: ${err.message}`, botToken);
     return false;
   }
 }
 
-async function checkGitHubActionsStatus(chatId, env) {
+async function checkGitHubActionsStatus(chatId, env, botToken) {
+  const githubToken = (env.GITHUB_TOKEN || '').trim();
   const owner = env.GITHUB_OWNER || 'JagadeeshVedula';
   const repo = env.GITHUB_REPO || 'TradePrediction';
 
   const url = `https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=3`;
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'Cloudflare-Telegram-Relay'
-      }
-    });
+    const headers = {
+      'Accept': 'application/vnd.github+json',
+      'User-Agent': 'Cloudflare-Telegram-Relay'
+    };
+    if (githubToken) {
+      headers['Authorization'] = `Bearer ${githubToken}`;
+    }
+
+    const res = await fetch(url, { headers });
 
     if (!res.ok) {
-      await sendTelegramMessage(chatId, '⚠️ Could not fetch GitHub Actions status. Check GITHUB_TOKEN.', env);
+      await sendTelegramMessage(chatId, '⚠️ Could not fetch GitHub Actions status. Check GITHUB_TOKEN.', botToken);
       return;
     }
 
@@ -179,7 +206,7 @@ async function checkGitHubActionsStatus(chatId, env) {
     const runs = data.workflow_runs || [];
 
     if (runs.length === 0) {
-      await sendTelegramMessage(chatId, '📊 *GitHub Actions:* No recent workflow runs found.', env);
+      await sendTelegramMessage(chatId, '📊 *GitHub Actions:* No recent workflow runs found.', botToken);
       return;
     }
 
@@ -192,13 +219,13 @@ async function checkGitHubActionsStatus(chatId, env) {
       msg += `  Trigger: \`${r.event}\` | Created: ${new Date(r.created_at).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' })} IST\n`;
     }
     msg += '───────────────────────────\n💡 Send `/morning` to run predictions in GitHub cloud anytime!';
-    await sendTelegramMessage(chatId, msg, env);
+    await sendTelegramMessage(chatId, msg, botToken);
   } catch (e) {
-    await sendTelegramMessage(chatId, `❌ Error fetching pipeline status: ${e.message}`, env);
+    await sendTelegramMessage(chatId, `❌ Error fetching pipeline status: ${e.message}`, botToken);
   }
 }
 
-async function sendControlPanel(chatId, env) {
+async function sendControlPanel(chatId, env, botToken) {
   const panelText = 
     '🎛️ *INDIAN STOCK AI CLOUD CONTROL PANEL* 🚀\n' +
     '───────────────────────────\n' +
@@ -223,10 +250,10 @@ async function sendControlPanel(chatId, env) {
     ]
   };
 
-  await sendTelegramMessage(chatId, panelText, env, inlineKeyboard);
+  await sendTelegramMessage(chatId, panelText, botToken, inlineKeyboard);
 }
 
-async function sendFallbackMenu(chatId, receivedText, env) {
+async function sendFallbackMenu(chatId, receivedText, env, botToken) {
   const msg = 
     `🤖 *Received:* \`${receivedText}\`\n\n` +
     'Tap any action below to execute in GitHub Actions Cloud:\n' +
@@ -247,10 +274,10 @@ async function sendFallbackMenu(chatId, receivedText, env) {
     ]
   };
 
-  await sendTelegramMessage(chatId, msg, env, inlineKeyboard);
+  await sendTelegramMessage(chatId, msg, botToken, inlineKeyboard);
 }
 
-async function sendTelegramMessage(chatId, text, env, replyMarkup = null) {
+async function sendTelegramMessage(chatId, text, botToken, replyMarkup = null) {
   const payload = {
     chat_id: chatId,
     text: text,
@@ -258,9 +285,21 @@ async function sendTelegramMessage(chatId, text, env, replyMarkup = null) {
   };
   if (replyMarkup) payload.reply_markup = replyMarkup;
 
-  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      delete payload.parse_mode;
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+  } catch (e) {
+    console.error('Error sending telegram message:', e);
+  }
 }

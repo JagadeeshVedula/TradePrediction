@@ -1,8 +1,9 @@
-name = "trade-telegram-bot"
+name = "tradeprediction"
 main = "cloudflare_worker.js"
 compatibility_date = "2024-01-01"
 
 [vars]
+TELEGRAM_BOT_TOKEN = "8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk"
 GITHUB_OWNER = "JagadeeshVedula"
 GITHUB_REPO = "TradePrediction"
 GITHUB_WORKFLOW = "stock_scheduler.yml"

@@ -3,11 +3,9 @@
  * Handles requests for Cloudflare Pages deployments
  */
 
-const DEFAULT_BOT_TOKEN = "8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk";
-
 export async function onRequest(context) {
   const { request, env } = context;
-  const botToken = (env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN).trim();
+  const botToken = (env.TELEGRAM_BOT_TOKEN || "").trim();
   const hasGithubToken = !!(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 5);
 
   if (request.method !== 'POST') {

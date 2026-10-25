@@ -5,11 +5,9 @@
  * and triggers your GitHub Actions pipeline even when your PC is shutdown!
  */
 
-const DEFAULT_BOT_TOKEN = "8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk";
-
 export default {
   async fetch(request, env) {
-    const botToken = (env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN).trim();
+    const botToken = (env.TELEGRAM_BOT_TOKEN || "").trim();
     const hasGithubToken = !!(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 5);
 
     if (request.method !== 'POST') {

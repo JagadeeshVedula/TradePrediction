@@ -28,7 +28,7 @@ Ensure your GitHub repository has the necessary secrets configured:
 1. Open your repository on GitHub (`https://github.com/JagadeeshVedula/TradePrediction`).
 2. Go to **Settings** ➔ **Secrets and variables** ➔ **Actions**.
 3. Under **Repository secrets**, ensure these are set:
-   - `TELEGRAM_BOT_TOKEN`: `8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk`
+   - `TELEGRAM_BOT_TOKEN`: Your Telegram Bot Token from @BotFather
    - `TELEGRAM_CHAT_ID`: `-5416154293,8006589467`
    - `GEMINI_API_KEY`: Your Google Gemini API Key
 
@@ -65,7 +65,7 @@ If you want typing `/morning` or tapping buttons directly in Telegram to launch 
 
 3. **Add Environment Variables in Cloudflare**:
    - Go to Worker **Settings** ➔ **Variables and Secrets** ➔ **Add**:
-     - `TELEGRAM_BOT_TOKEN`: `8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk`
+     - `TELEGRAM_BOT_TOKEN`: Your Telegram Bot Token from @BotFather
      - `GITHUB_TOKEN`: Your GitHub PAT token from Step 1.
      - `GITHUB_OWNER`: `JagadeeshVedula`
      - `GITHUB_REPO`: `TradePrediction`
@@ -75,7 +75,7 @@ If you want typing `/morning` or tapping buttons directly in Telegram to launch 
    - Copy your worker URL (e.g., `https://trade-telegram-bot.yourname.workers.dev`).
    - Open your browser and visit:
      ```
-     https://api.telegram.org/bot8879789351:AAHKgqfKNu5t59-2TbVS_r6JEW9Vdt89Wpk/setWebhook?url=https://trade-telegram-bot.yourname.workers.dev
+     https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://trade-telegram-bot.yourname.workers.dev
      ```
    - You will see `{"ok":true,"result":true,"description":"Webhook was set"}`.
 

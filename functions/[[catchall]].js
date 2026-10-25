@@ -6,14 +6,16 @@
 export async function onRequest(context) {
   const { request, env } = context;
   const botToken = (env.TELEGRAM_BOT_TOKEN || "").trim();
-  const hasGithubToken = !!(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 5);
+  const githubToken = getGithubToken(env);
+  const hasGithubToken = githubToken.length > 5;
 
   if (request.method !== 'POST') {
     const info = {
       status: "Active",
       message: "Telegram to GitHub Actions Relay is Active!",
-      has_TELEGRAM_BOT_TOKEN: true,
+      has_TELEGRAM_BOT_TOKEN: !!(botToken && botToken.length > 10),
       has_GITHUB_TOKEN: hasGithubToken,
+      configured_env_keys: Object.keys(env || {}).filter(k => !k.startsWith('__')),
       github_owner: env.GITHUB_OWNER || "JagadeeshVedula",
       github_repo: env.GITHUB_REPO || "TradePrediction",
       github_workflow: env.GITHUB_WORKFLOW || "stock_scheduler.yml"
@@ -110,8 +112,22 @@ async function handleTelegramUpdate(update, env, botToken) {
   }
 }
 
+function getGithubToken(env) {
+  if (!env) return '';
+  return (
+    env.GITHUB_TOKEN ||
+    env.github_token ||
+    env.GH_TOKEN ||
+    env.gh_token ||
+    env.GITHUB_PAT ||
+    env.PAT_TOKEN ||
+    env.TOKEN ||
+    ''
+  ).trim();
+}
+
 async function triggerGitHubWorkflow(chatId, env, botToken, mode) {
-  const githubToken = (env.GITHUB_TOKEN || '').trim();
+  const githubToken = getGithubToken(env);
 
   if (!githubToken) {
     await sendTelegramMessage(

@@ -1,11 +1,6 @@
 name: Stock AI Predictor Automated Scheduler
 
 on:
-  schedule:
-    # 03:45 UTC = 09:15 AM IST (Monday to Friday) - Morning Prediction & Market Session
-    - cron: '45 3 * * 1-5'
-    # 11:00 UTC = 04:30 PM IST (Monday to Friday) - Evening Report & ML Retraining
-    - cron: '00 11 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
@@ -43,7 +38,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Determine Mode from Schedule or Dispatch
+      - name: Determine Mode from Telegram or Manual Dispatch
         id: select_mode
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -52,12 +47,7 @@ jobs:
             DISPATCH_MODE="${{ github.event.client_payload.mode || github.event.action }}"
             echo "mode=${DISPATCH_MODE:-morning}" >> $GITHUB_OUTPUT
           else
-            HOUR=$(date -u +%H)
-            if [ "$HOUR" -lt "8" ]; then
-              echo "mode=full-cycle" >> $GITHUB_OUTPUT
-            else
-              echo "mode=evening" >> $GITHUB_OUTPUT
-            fi
+            echo "mode=morning" >> $GITHUB_OUTPUT
           fi
 
       - name: Execute Stock AI Predictor

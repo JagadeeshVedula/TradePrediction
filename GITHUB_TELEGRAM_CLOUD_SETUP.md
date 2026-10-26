@@ -80,3 +80,17 @@ If you want typing `/morning` or tapping buttons directly in Telegram to launch 
    - You will see `{"ok":true,"result":true,"description":"Webhook was set"}`.
 
 Now, whenever you prompt in Telegram from your phone, Cloudflare instantly catches the prompt, fires your GitHub Actions pipeline, and GitHub delivers the results back to Telegram!
+
+---
+
+## 🔄 Supported Telegram Commands & Actions
+
+| Command / Button | Action in GitHub Cloud | Description |
+| :--- | :--- | :--- |
+| `🌅 Morning Prediction` or `/morning` | Mode: `morning` | Fetches US/Asian cues, scans Indian stocks (< ₹500), runs Gemini AI, sends top 5 picks. |
+| `🔄 Full Pipeline` or `/full_pipeline` | Mode: `full-cycle` | **Full Day Session:** Runs morning prediction + 1m live intraday tracking until 03:30 PM + evening report & retraining! |
+| `🌆 Evening Report` or `/evening` | Mode: `evening` | Post-close P&L calculation (+₹2 target / -₹1 stop loss) and continuous ML retraining. |
+| `📊 Pipeline Status` or `/status` | Mode: API Query | Displays recent GitHub Actions workflow runs and their completion states. |
+
+> [!TIP]
+> If you have already deployed your Cloudflare Worker previously, make sure to copy the latest code from [`cloudflare_worker.js`](file:///c:/Users/Jagadeesh/Documents/TradePrediction/cloudflare_worker.js) into your Cloudflare Worker (`Quick Edit` / `Edit code`) and click **Deploy** so the `full pipeline` trigger is active on your worker!

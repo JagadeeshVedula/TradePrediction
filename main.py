@@ -20,9 +20,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Top 5 Indian Stocks (< ₹500) Gain Predictor & Intraday 1m Tracker System")
     parser.add_argument(
         "--mode",
-        choices=["morning", "evening", "monitor", "train-initial", "test-telegram", "get-chats", "full-cycle", "telegram-bot", "news"],
+        choices=["morning", "evening", "monitor", "train-initial", "test-telegram", "get-chats", "full-cycle", "full_cycle", "full_pipeline", "telegram-bot", "news"],
         default="morning",
-        help="Operation mode: 'morning' (predictions), 'evening' (P&L report & retraining), 'monitor' (1m intraday tracker), 'telegram-bot' (interactive bot), 'news', 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle'"
+        help="Operation mode: 'morning', 'evening', 'monitor', 'telegram-bot', 'news', 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle' ('full_pipeline')"
     )
     parser.add_argument(
         "--date",
@@ -94,6 +94,39 @@ def run_evening_mode(date_str: str, send_telegram: bool = True, target_chat_id: 
         send_telegram_message(report, target_chat_id=target_chat_id)
     return report
 
+def run_full_cycle_mode(date_str: str, send_telegram: bool = True, target_chat_id: Optional[str] = None):
+    """
+    Execute complete end-to-end trading pipeline cycle:
+    1. Morning Prediction (Gemini AI + Global Cues) -> Telegram
+    2. 1-Minute Live Intraday Tracker (active during market hours until 15:30 IST)
+    3. Evening Post-Market Close P&L Breakdown & Continuous ML Retraining -> Telegram
+    """
+    from zoneinfo import ZoneInfo
+    print(f"🔄 Executing Full Pipeline Cycle for {date_str}...")
+    
+    # Phase 1: Morning Prediction
+    print("🌅 Phase 1: Generating Morning Predictions (< ₹500 stocks)...")
+    run_morning_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
+
+    # Phase 2: Intraday 1-Minute Monitoring
+    now_ist = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
+    is_trading_hours = (
+        now_ist.weekday() < 5
+        and (now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute >= 15))
+        and (now_ist.hour < 15 or (now_ist.hour == 15 and now_ist.minute <= 30))
+    )
+
+    if is_trading_hours:
+        print("⏱️ Phase 2: Live 1-Minute Intraday Monitoring until Market Close (15:30 IST)...")
+        run_intraday_1m_tracker(date_str=date_str)
+    else:
+        print("ℹ️ Phase 2: Outside market hours. Running single-pass intraday price sync...")
+        run_intraday_1m_tracker(date_str=date_str, single_pass=True)
+
+    # Phase 3: Evening P&L & Retraining
+    print("🌆 Phase 3: Generating Evening P&L Report & Retraining ML Model...")
+    run_evening_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
+
 def main():
     args = parse_args()
     date_str = args.date
@@ -123,10 +156,8 @@ def main():
         print("\n" + ctx.get("summary_text", ""))
         print("\n📰 Domestic News Headlines:")
         print(ctx.get("formatted_news_text", ""))
-    elif args.mode == "full-cycle":
-        print("🔄 Executing Full-Cycle (Morning Analysis + Evening Close Retraining)...")
-        run_morning_mode(date_str, send_telegram=False)
-        run_evening_mode(date_str, send_telegram=True)
+    elif args.mode in ["full-cycle", "full_cycle", "full_pipeline"]:
+        run_full_cycle_mode(date_str, send_telegram=True)
 
 if __name__ == "__main__":
     main()

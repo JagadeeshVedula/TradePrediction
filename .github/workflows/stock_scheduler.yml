@@ -16,7 +16,7 @@ on:
           - train-initial
           - test-telegram
   repository_dispatch:
-    types: [telegram-command, morning, evening, monitor, full-cycle]
+    types: [telegram-command, morning, evening, monitor, full-cycle, full_cycle, full_pipeline]
 
 jobs:
   run-stock-ai:
@@ -61,7 +61,7 @@ jobs:
         run: |
           MODE="${{ steps.select_mode.outputs.mode }}"
           echo "🚀 Executing Stock AI in mode: $MODE"
-          if [ "$MODE" = "full-cycle" ]; then
+          if [ "$MODE" = "full-cycle" ] || [ "$MODE" = "full_cycle" ] || [ "$MODE" = "full_pipeline" ]; then
             # 1. Generate morning predictions (< ₹500 stocks, ₹25k allocation)
             python main.py --mode morning --send-telegram
             

@@ -170,6 +170,10 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
             print("✅ 1-Minute tick pass complete.")
             break
 
+        if now_ist.weekday() >= 5:
+            print("🏛️ Market is closed today (Weekend). Closing 1-minute monitoring daemon.")
+            break
+
         # Check market close time (15:30 IST)
         if now_ist.hour >= 15 and now_ist.minute >= 30:
             print("🌆 Market Close Time Reached (15:30 IST). Closing 1-minute monitoring daemon.")

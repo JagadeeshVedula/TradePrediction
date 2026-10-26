@@ -106,15 +106,15 @@ def get_control_panel_inline_markup() -> Dict[str, Any]:
         "inline_keyboard": [
             [
                 {"text": "🌅 Run Morning Prediction", "callback_data": "/morning"},
+                {"text": "🔄 Full Pipeline (Cycle)", "callback_data": "/full_cycle"}
+            ],
+            [
+                {"text": "🌆 Evening P&L Report", "callback_data": "/evening"},
                 {"text": "📊 Pipeline Status", "callback_data": "/status"}
             ],
             [
-                {"text": "▶️ Start Pipeline", "callback_data": "/start_pipeline"},
-                {"text": "⏸️ Stop Pipeline", "callback_data": "/stop_pipeline"}
-            ],
-            [
                 {"text": "🌐 Global News & Cues", "callback_data": "/news"},
-                {"text": "🌆 Evening P&L Report", "callback_data": "/evening"}
+                {"text": "⏸️ Pause Pipeline", "callback_data": "/stop_pipeline"}
             ]
         ]
     }
@@ -123,9 +123,9 @@ def get_persistent_reply_keyboard_markup() -> Dict[str, Any]:
     """Persistent big buttons docked at the bottom of the chat window."""
     return {
         "keyboard": [
-            [{"text": "🌅 Morning Prediction"}, {"text": "📊 Status"}],
-            [{"text": "▶️ Start Pipeline"}, {"text": "⏸️ Stop Pipeline"}],
-            [{"text": "🌐 Market News"}, {"text": "🌆 Evening Report"}]
+            [{"text": "🌅 Morning Prediction"}, {"text": "🔄 Full Pipeline"}],
+            [{"text": "🌆 Evening Report"}, {"text": "📊 Status"}],
+            [{"text": "🌐 Market News"}, {"text": "🎛️ Menu"}]
         ],
         "resize_keyboard": True,
         "is_persistent": True
@@ -138,11 +138,11 @@ def send_control_panel(chat_id: str):
         "───────────────────────────\n"
         "Use the buttons below to operate the automated trading pipeline:\n\n"
         "• 🌅 *Run Morning Prediction*: Analyze Indian stocks (< ₹500) with Gemini AI & Global News\n"
-        "• ▶️ *Start Pipeline*: Activate automated schedule (9:15 AM - 3:30 PM IST)\n"
-        "• ⏸️ *Stop Pipeline*: Pause automated trading\n"
+        "• 🔄 *Full Pipeline (Full Cycle)*: Run Complete Cycle (Morning Prediction + 1m Intraday Tracker + Evening Report)\n"
+        "• 🌆 *Evening Report*: Post-market close P&L breakdown per share\n"
         "• 📊 *Pipeline Status*: View active state & Gemini connection\n"
         "• 🌐 *Market News*: Live US & Singapore cues + Moneycontrol/TOI headlines\n"
-        "• 🌆 *Evening Report*: Post-market close P&L breakdown per share\n"
+        "• ⏸️ *Pause Pipeline*: Pause scheduled automation\n"
         "───────────────────────────\n"
         "💡 *Tap any button below to trigger actions immediately!*"
     )
@@ -157,12 +157,12 @@ def register_bot_commands() -> bool:
     if not TELEGRAM_BOT_TOKEN:
         return False
     commands = [
-        {"command": "morning", "description": "🌅 Run Morning Prediction (< ₹500) with Gemini"},
-        {"command": "start_pipeline", "description": "▶️ Start Automated Daily Trading Pipeline"},
-        {"command": "stop_pipeline", "description": "⏸️ Stop/Pause Daily Trading Pipeline"},
+        {"command": "morning", "description": "🌅 Run Morning Prediction (< ₹500)"},
+        {"command": "full_pipeline", "description": "🔄 Run Full Pipeline Cycle (Morning + Monitor + Evening)"},
+        {"command": "evening", "description": "🌆 Run Evening P&L Report & Retraining"},
         {"command": "status", "description": "📊 Check Pipeline State & Gemini Status"},
         {"command": "news", "description": "🌐 View US/Singapore Cues & Market News"},
-        {"command": "evening", "description": "🌆 Run Evening P&L Report & Retraining"},
+        {"command": "stop_pipeline", "description": "⏸️ Pause Automated Trading Pipeline"},
         {"command": "menu", "description": "🎛️ Open Control Panel with Clickable Buttons"},
         {"command": "help", "description": "❓ Show Help & Commands Guide"}
     ]
@@ -194,6 +194,24 @@ def _execute_morning_command(chat_id: str):
         main.run_morning_mode(date_str, send_telegram=True, target_chat_id=chat_id)
     except Exception as e:
         send_telegram_message(f"❌ Error during morning prediction: {e}", target_chat_id=chat_id)
+
+def _execute_full_cycle_command(chat_id: str):
+    """Worker to trigger full pipeline cycle (Morning + Monitor + Evening)."""
+    import main
+    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    send_telegram_message(
+        f"🔄 *Starting Full Pipeline Cycle for {date_str}...* 🚀\n"
+        f"───────────────────────────\n"
+        f"• 🌅 *Phase 1:* Morning Predictions (< ₹500 stocks, Gemini AI + News)\n"
+        f"• ⏱️ *Phase 2:* 1-Minute Live Intraday Tracking\n"
+        f"• 🌆 *Phase 3:* Evening P&L Report & Retraining\n\n"
+        f"⏳ Processing Morning Prediction now. Please wait ~15-20s...",
+        target_chat_id=chat_id
+    )
+    try:
+        main.run_full_cycle_mode(date_str, send_telegram=True, target_chat_id=chat_id)
+    except Exception as e:
+        send_telegram_message(f"❌ Error during full cycle execution: {e}", target_chat_id=chat_id)
 
 def _execute_evening_command(chat_id: str):
     """Worker to run evening report and reply directly to the requester."""
@@ -273,8 +291,16 @@ def handle_telegram_message(msg: dict):
         cmd = "/morning"
     elif "status" in clean_lower and not cmd.startswith("/"):
         cmd = "/status"
-    elif "start pipeline" in clean_lower and not cmd.startswith("/"):
-        cmd = "/start_pipeline"
+    elif (
+        "full pipeline" in clean_lower or
+        "full cycle" in clean_lower or
+        "start pipeline" in clean_lower or
+        "full-cycle" in clean_lower or
+        "fullcycle" in clean_lower or
+        "full_pipeline" in clean_lower or
+        "pipeline" in clean_lower
+    ) and not clean_lower.startswith("stop") and not cmd.startswith("/"):
+        cmd = "/full_cycle"
     elif "stop pipeline" in clean_lower and not cmd.startswith("/"):
         cmd = "/stop_pipeline"
     elif "news" in clean_lower and not cmd.startswith("/"):
@@ -283,6 +309,10 @@ def handle_telegram_message(msg: dict):
         cmd = "/evening"
     elif "menu" in clean_lower and not cmd.startswith("/"):
         cmd = "/menu"
+
+    # Normalize command aliases to trigger full cycle
+    if cmd in ["/full_cycle", "/full_pipeline", "/pipeline", "/full-cycle", "/fullcycle", "/start_pipeline"]:
+        cmd = "/full_cycle"
 
     if cmd in ["/start", "/help", "/menu"]:
         send_control_panel(chat_id)
@@ -293,27 +323,20 @@ def handle_telegram_message(msg: dict):
     elif cmd == "/evening":
         threading.Thread(target=_execute_evening_command, args=(chat_id,), daemon=True).start()
 
+    elif cmd == "/full_cycle":
+        state = set_pipeline_state(True, source=f"Telegram ({chat_id})")
+        threading.Thread(target=_execute_full_cycle_command, args=(chat_id,), daemon=True).start()
+
     elif cmd == "/news":
         threading.Thread(target=_execute_news_command, args=(chat_id,), daemon=True).start()
-
-    elif cmd == "/start_pipeline":
-        state = set_pipeline_state(True, source=f"Telegram ({chat_id})")
-        reply = (
-            "✅ *Automated Trading Pipeline STARTED!* 🚀\n\n"
-            "• *Morning Predictions:* Scheduled daily at 09:15 AM IST\n"
-            "• *1-Minute Intraday Tracking:* Active 09:15 AM - 03:30 PM IST\n"
-            "• *Evening Report & Retraining:* Scheduled at 04:30 PM IST\n\n"
-            "Send `/stop_pipeline` anytime to pause."
-        )
-        send_telegram_message(reply, target_chat_id=chat_id)
 
     elif cmd == "/stop_pipeline":
         state = set_pipeline_state(False, source=f"Telegram ({chat_id})")
         reply = (
             "⏸️ *Automated Trading Pipeline STOPPED!* 🛑\n\n"
             "Daily automatic morning predictions and 1-minute intraday tracking are now PAUSED.\n\n"
-            "• You can still trigger on-demand predictions manually anytime using `/morning`!\n"
-            "• To resume automated schedule, send `/start_pipeline`."
+            "• You can still trigger on-demand predictions manually anytime using `/morning` or `/full_pipeline`!\n"
+            "• To resume automated schedule and run full cycle, send `/full_pipeline`."
         )
         send_telegram_message(reply, target_chat_id=chat_id)
 
@@ -336,7 +359,7 @@ def handle_telegram_message(msg: dict):
             f"🎯 *Universe:* Top Indian Stocks < ₹500 (Assumed ₹25k Allocation per Stock)\n"
             f"⚡ *Strategy:* Pre-10am (+₹10) | Post-10am Target (+₹2) / Stop Loss (-₹1)\n"
             f"───────────────────────────\n"
-            f"Send `/morning` to run predictions or `/help` for commands."
+            f"Send `/morning` to run predictions, `/full_pipeline` for full cycle, or `/help` for commands."
         )
         send_telegram_message(status_msg, target_chat_id=chat_id)
 
@@ -365,10 +388,10 @@ def handle_telegram_message(msg: dict):
             f"🤖 *Received:* `{text}`\n\n"
             "Here are the available actions:\n"
             "• 🌅 `/morning` — Run Morning Prediction (< ₹500)\n"
+            "• 🔄 `/full_pipeline` — Run Full Pipeline (Morning + 1m Monitor + Evening)\n"
+            "• 🌆 `/evening` — Evening P&L & Retraining\n"
             "• 📊 `/status` — View Pipeline & AI Status\n"
             "• 🌐 `/news` — US & Singapore Cues + News\n"
-            "• 🌆 `/evening` — Evening P&L & Retraining\n"
-            "• ▶️ `/start_pipeline` — Activate Daily Auto Schedule\n"
             "• ⏸️ `/stop_pipeline` — Pause Daily Schedule\n\n"
             "👇 *Or simply tap any button below:*"
         )

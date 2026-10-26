@@ -72,10 +72,36 @@ async function handleTelegramUpdate(update, env, botToken) {
   else if (cleanLower.includes('evening') && !cmd.startsWith('/')) cmd = '/evening';
   else if (cleanLower.includes('status') && !cmd.startsWith('/')) cmd = '/status';
   else if (cleanLower.includes('news') && !cmd.startsWith('/')) cmd = '/news';
-  else if (cleanLower.includes('start pipeline') && !cmd.startsWith('/')) cmd = '/start_pipeline';
-  else if (cleanLower.includes('stop pipeline') && !cmd.startsWith('/')) cmd = '/stop_pipeline';
+  else if (
+    (cleanLower.includes('full pipeline') ||
+     cleanLower.includes('full cycle') ||
+     cleanLower.includes('start pipeline') ||
+     cleanLower.includes('full-cycle') ||
+     cleanLower.includes('fullcycle') ||
+     cleanLower.includes('full_pipeline') ||
+     cleanLower.includes('pipeline')) &&
+    !cleanLower.includes('stop') &&
+    !cmd.startsWith('/')
+  ) {
+    cmd = '/full_cycle';
+  } else if (cleanLower.includes('stop pipeline') && !cmd.startsWith('/')) {
+    cmd = '/stop_pipeline';
+  }
+
+  // Normalize commands and aliases to trigger full cycle
+  if (
+    cmd === '/full_cycle' ||
+    cmd === '/full_pipeline' ||
+    cmd === '/pipeline' ||
+    cmd === '/full-cycle' ||
+    cmd === '/fullcycle' ||
+    cmd === '/start_pipeline'
+  ) {
+    cmd = '/full_cycle';
+  }
 
   if (cmd === '/start' || cmd === '/help' || cmd === '/menu') {
+    await registerTelegramCommands(botToken);
     await sendControlPanel(chatId, env, botToken);
   } else if (cmd === '/morning') {
     await sendTelegramMessage(
@@ -103,16 +129,49 @@ async function handleTelegramUpdate(update, env, botToken) {
   } else if (cmd === '/full_cycle') {
     await sendTelegramMessage(
       chatId,
-      '🔄 *Triggering Full Market Cycle in GitHub Actions!* ☁️\n' +
-      'Morning Prediction + 1-minute monitoring until 3:30 PM + Evening Report.',
+      '🔄 *Triggering Full Pipeline (Full Cycle) in GitHub Actions Cloud!* ☁️\n' +
+      '───────────────────────────\n' +
+      '• GitHub Actions runner is spinning up...\n' +
+      '• 🌅 *Phase 1:* Morning Prediction (< ₹500 stocks, Gemini AI + News)\n' +
+      '• ⏱️ *Phase 2:* 1-Minute Live Intraday Tracking (until 03:30 PM IST)\n' +
+      '• 🌆 *Phase 3:* Evening P&L Report & Retraining (after market close)\n\n' +
+      '💡 *Your computer does NOT need to be on.* Reports will arrive directly in this chat!',
       botToken
     );
     await triggerGitHubWorkflow(chatId, env, botToken, 'full-cycle');
+  } else if (cmd === '/stop_pipeline') {
+    await sendTelegramMessage(
+      chatId,
+      '⏸️ *Pipeline Management:*\n' +
+      '• Cloud scheduled runs trigger automatically at 09:15 AM and 04:30 PM IST (Mon-Fri).\n' +
+      '• On-demand jobs run whenever you trigger `/morning`, `/evening`, or `/full_pipeline`.\n' +
+      '• To cancel any active cloud run, visit GitHub ➔ Actions ➔ Select Run ➔ Cancel.',
+      botToken
+    );
   } else if (cmd === '/status') {
     await checkGitHubActionsStatus(chatId, env, botToken);
   } else {
     await sendFallbackMenu(chatId, text, env, botToken);
   }
+}
+
+async function registerTelegramCommands(botToken) {
+  if (!botToken) return;
+  const commands = [
+    { command: "morning", description: "🌅 Run Morning Prediction (< ₹500)" },
+    { command: "full_pipeline", description: "🔄 Run Full Pipeline Cycle (Morning + Monitor + Evening)" },
+    { command: "evening", description: "🌆 Run Evening P&L Report & Retraining" },
+    { command: "status", description: "📊 Check Pipeline Status on GitHub Cloud" },
+    { command: "menu", description: "🎛️ Open Control Panel with Clickable Buttons" },
+    { command: "help", description: "❓ Show Help & Commands Guide" }
+  ];
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands })
+    });
+  } catch (e) {}
 }
 
 function getGithubToken(env) {
@@ -248,26 +307,37 @@ async function sendControlPanel(chatId, env, botToken) {
     '───────────────────────────\n' +
     'Operate your cloud trading pipeline directly from Telegram (No PC needed):\n\n' +
     '• 🌅 *Run Morning Prediction*: Triggers Gemini AI & Global News pipeline in GitHub Actions\n' +
-    '• 📊 *Pipeline Status*: Check GitHub Actions cloud runner status\n' +
+    '• 🔄 *Full Pipeline (Full Cycle)*: Complete Morning + Intraday Tracking + Evening Report\n' +
     '• 🌆 *Evening Report*: Post-market close P&L breakdown\n' +
-    '• 🔄 *Full Day Cycle*: Complete morning + intraday tracking session\n' +
+    '• 📊 *Pipeline Status*: Check GitHub Actions cloud runner status\n' +
     '───────────────────────────\n' +
     '💡 *Tap any button below to trigger GitHub Actions immediately!*';
 
   const inlineKeyboard = {
     inline_keyboard: [
       [
-        { text: '🌅 Run Morning Prediction', callback_data: '/morning' },
-        { text: '📊 Pipeline Status', callback_data: '/status' }
+        { text: '🌅 Morning Prediction', callback_data: '/morning' },
+        { text: '🔄 Full Pipeline', callback_data: '/full_cycle' }
       ],
       [
         { text: '🌆 Evening P&L Report', callback_data: '/evening' },
-        { text: '🔄 Full Day Cycle', callback_data: '/full_cycle' }
+        { text: '📊 Pipeline Status', callback_data: '/status' }
       ]
     ]
   };
 
+  const replyKeyboard = {
+    keyboard: [
+      [{ text: '🌅 Morning Prediction' }, { text: '🔄 Full Pipeline' }],
+      [{ text: '🌆 Evening Report' }, { text: '📊 Pipeline Status' }],
+      [{ text: '🎛️ Menu' }]
+    ],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+
   await sendTelegramMessage(chatId, panelText, botToken, inlineKeyboard);
+  await sendTelegramMessage(chatId, '👇 *Control buttons are also docked on your keyboard below:*', botToken, replyKeyboard);
 }
 
 async function sendFallbackMenu(chatId, receivedText, env, botToken) {
@@ -275,18 +345,19 @@ async function sendFallbackMenu(chatId, receivedText, env, botToken) {
     `🤖 *Received:* \`${receivedText}\`\n\n` +
     'Tap any action below to execute in GitHub Actions Cloud:\n' +
     '• 🌅 `/morning` — Run Morning Prediction (< ₹500)\n' +
-    '• 📊 `/status` — View GitHub Pipeline Runs\n' +
+    '• 🔄 `/full_pipeline` — Full Pipeline (Morning + Intraday + Evening Cycle)\n' +
     '• 🌆 `/evening` — Evening P&L & Retraining\n' +
-    '• 🔄 `/full_cycle` — Full Intraday Session';
+    '• 📊 `/status` — View GitHub Pipeline Runs';
 
   const inlineKeyboard = {
     inline_keyboard: [
       [
-        { text: '🌅 Run Morning Prediction', callback_data: '/morning' },
-        { text: '📊 Pipeline Status', callback_data: '/status' }
+        { text: '🌅 Morning Prediction', callback_data: '/morning' },
+        { text: '🔄 Full Pipeline', callback_data: '/full_cycle' }
       ],
       [
-        { text: '🌆 Evening P&L Report', callback_data: '/evening' }
+        { text: '🌆 Evening P&L Report', callback_data: '/evening' },
+        { text: '📊 Pipeline Status', callback_data: '/status' }
       ]
     ]
   };

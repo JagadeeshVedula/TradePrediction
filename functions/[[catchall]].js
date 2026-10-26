@@ -5,8 +5,8 @@
 
 export async function onRequest(context) {
   const { request, env } = context;
-  const botToken = (env.TELEGRAM_BOT_TOKEN || "").trim();
-  const githubToken = getGithubToken(env);
+  const botToken = getBotToken(env, request);
+  const githubToken = getGithubToken(env, request);
   const hasGithubToken = githubToken.length > 5;
 
   if (request.method !== 'POST') {
@@ -15,6 +15,7 @@ export async function onRequest(context) {
       message: "Telegram to GitHub Actions Relay is Active!",
       has_TELEGRAM_BOT_TOKEN: !!(botToken && botToken.length > 10),
       has_GITHUB_TOKEN: hasGithubToken,
+      token_source: botToken ? (env && (env.TELEGRAM_BOT_TOKEN || env.BOT_TOKEN) ? 'env' : 'url_parameter') : 'missing',
       configured_env_keys: Object.keys(env || {}).filter(k => !k.startsWith('__')),
       github_owner: env.GITHUB_OWNER || "JagadeeshVedula",
       github_repo: env.GITHUB_REPO || "TradePrediction",
@@ -26,9 +27,14 @@ export async function onRequest(context) {
     });
   }
 
+  if (!botToken) {
+    console.error("TELEGRAM_BOT_TOKEN is missing in Cloudflare Pages environment and URL.");
+    return new Response("Missing TELEGRAM_BOT_TOKEN. Configure in Cloudflare Secrets or webhook URL.", { status: 200 });
+  }
+
   try {
     const update = await request.json();
-    await handleTelegramUpdate(update, env, botToken);
+    await handleTelegramUpdate(update, env, botToken, githubToken);
     return new Response('OK', { status: 200 });
   } catch (err) {
     console.error('Error handling update:', err);
@@ -36,7 +42,7 @@ export async function onRequest(context) {
   }
 }
 
-async function handleTelegramUpdate(update, env, botToken) {
+async function handleTelegramUpdate(update, env, botToken, githubToken = '') {
   let chatId = null;
   let text = '';
   let callbackQueryId = null;
@@ -111,7 +117,7 @@ async function handleTelegramUpdate(update, env, botToken) {
       '💡 *Your computer does NOT need to be on.*',
       botToken
     );
-    await triggerGitHubWorkflow(chatId, env, botToken, 'morning');
+    await triggerGitHubWorkflow(chatId, env, botToken, 'morning', githubToken);
   } else if (cmd === '/evening') {
     await sendTelegramMessage(
       chatId,
@@ -122,7 +128,7 @@ async function handleTelegramUpdate(update, env, botToken) {
       '• Report will arrive here shortly.',
       botToken
     );
-    await triggerGitHubWorkflow(chatId, env, botToken, 'evening');
+    await triggerGitHubWorkflow(chatId, env, botToken, 'evening', githubToken);
   } else if (cmd === '/full_cycle') {
     await sendTelegramMessage(
       chatId,
@@ -135,7 +141,7 @@ async function handleTelegramUpdate(update, env, botToken) {
       '💡 *Your computer does NOT need to be on.* Reports will arrive directly in this chat!',
       botToken
     );
-    await triggerGitHubWorkflow(chatId, env, botToken, 'full-cycle');
+    await triggerGitHubWorkflow(chatId, env, botToken, 'full-cycle', githubToken);
   } else if (cmd === '/stop_pipeline') {
     await sendTelegramMessage(
       chatId,
@@ -146,7 +152,7 @@ async function handleTelegramUpdate(update, env, botToken) {
       botToken
     );
   } else if (cmd === '/status') {
-    await checkGitHubActionsStatus(chatId, env, botToken);
+    await checkGitHubActionsStatus(chatId, env, botToken, githubToken);
   } else {
     await sendFallbackMenu(chatId, text, env, botToken);
   }
@@ -171,24 +177,74 @@ async function registerTelegramCommands(botToken) {
   } catch (e) {}
 }
 
-function getGithubToken(env) {
-  if (!env) return '';
-  return (
-    env.GITHUB_TOKEN ||
-    env.github_token ||
-    env.GH_TOKEN ||
-    env.gh_token ||
-    env.GITHUB_PAT ||
-    env.PAT_TOKEN ||
-    env.TOKEN ||
-    ''
-  ).trim();
+function getBotToken(env, request) {
+  if (env) {
+    const fromEnv = (
+      env.TELEGRAM_BOT_TOKEN ||
+      env.telegram_bot_token ||
+      env.BOT_TOKEN ||
+      env.bot_token ||
+      env.TELEGRAM_TOKEN ||
+      env.telegram_token ||
+      env.TG_BOT_TOKEN ||
+      env.TG_TOKEN ||
+      ''
+    ).trim();
+    if (fromEnv && fromEnv.length > 10) return fromEnv;
+  }
+  if (request && request.url) {
+    try {
+      const url = new URL(request.url);
+      const queryToken = (
+        url.searchParams.get('token') ||
+        url.searchParams.get('bot_token') ||
+        url.searchParams.get('telegram_bot_token') ||
+        ''
+      ).trim();
+      if (queryToken && queryToken.length > 10) return queryToken;
+
+      const pathParts = url.pathname.replace(/^\/+/, '').split('/');
+      if (pathParts[0]) {
+        const first = pathParts[0].replace(/^bot/, '');
+        if (first.includes(':') && first.length > 10) return first;
+      }
+    } catch (e) {}
+  }
+  return '';
 }
 
-async function triggerGitHubWorkflow(chatId, env, botToken, mode) {
-  const githubToken = getGithubToken(env);
+function getGithubToken(env, request) {
+  if (env) {
+    const fromEnv = (
+      env.GITHUB_TOKEN ||
+      env.github_token ||
+      env.GH_TOKEN ||
+      env.gh_token ||
+      env.GITHUB_PAT ||
+      env.PAT_TOKEN ||
+      env.TOKEN ||
+      ''
+    ).trim();
+    if (fromEnv && fromEnv.length > 5) return fromEnv;
+  }
+  if (request && request.url) {
+    try {
+      const url = new URL(request.url);
+      const queryGh = (
+        url.searchParams.get('gh_token') ||
+        url.searchParams.get('github_token') ||
+        ''
+      ).trim();
+      if (queryGh && queryGh.length > 5) return queryGh;
+    } catch (e) {}
+  }
+  return '';
+}
 
-  if (!githubToken) {
+async function triggerGitHubWorkflow(chatId, env, botToken, mode, githubToken = '') {
+  const ghToken = (githubToken || getGithubToken(env)).trim();
+
+  if (!ghToken) {
     await sendTelegramMessage(
       chatId,
       '⚠️ *GITHUB_TOKEN is missing in Cloudflare Secrets!*\n\n' +
@@ -212,7 +268,7 @@ async function triggerGitHubWorkflow(chatId, env, botToken, mode) {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${githubToken}`,
+        'Authorization': `Bearer ${ghToken}`,
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'Cloudflare-Telegram-Relay',
         'Content-Type': 'application/json'
@@ -252,8 +308,8 @@ async function triggerGitHubWorkflow(chatId, env, botToken, mode) {
   }
 }
 
-async function checkGitHubActionsStatus(chatId, env, botToken) {
-  const githubToken = (env.GITHUB_TOKEN || '').trim();
+async function checkGitHubActionsStatus(chatId, env, botToken, githubToken = '') {
+  const ghToken = (githubToken || getGithubToken(env)).trim();
   const owner = env.GITHUB_OWNER || 'JagadeeshVedula';
   const repo = env.GITHUB_REPO || 'TradePrediction';
 
@@ -264,8 +320,8 @@ async function checkGitHubActionsStatus(chatId, env, botToken) {
       'Accept': 'application/vnd.github+json',
       'User-Agent': 'Cloudflare-Telegram-Relay'
     };
-    if (githubToken) {
-      headers['Authorization'] = `Bearer ${githubToken}`;
+    if (ghToken) {
+      headers['Authorization'] = `Bearer ${ghToken}`;
     }
 
     const res = await fetch(url, { headers });

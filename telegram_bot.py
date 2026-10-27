@@ -219,7 +219,7 @@ def _execute_evening_command(chat_id: str):
     date_str = datetime.date.today().strftime("%Y-%m-%d")
     send_telegram_message(
         f"⏳ *Generating Evening P&L Report for {date_str}...*\n"
-        f"📊 Evaluating 1-minute intraday price action per share (+₹2 / -₹1) and retraining AI model...",
+        f"📊 Evaluating 1-minute intraday price action per share (+₹2 target with +₹1 Trailing SL / -₹1 initial SL) and retraining AI model...",
         target_chat_id=chat_id
     )
     try:
@@ -357,7 +357,7 @@ def handle_telegram_message(msg: dict):
             f"{pipeline_status}\n\n"
             f"🧠 *Google Gemini AI:* {gemini_badge}\n"
             f"🎯 *Universe:* Top Indian Stocks < ₹500 (Assumed ₹25k Allocation per Stock)\n"
-            f"⚡ *Strategy:* Pre-10am (+₹10) | Post-10am Target (+₹2) / Stop Loss (-₹1)\n"
+            f"⚡ *Strategy:* Pre-10am (+₹10) | Post-10am Target (+₹2, Trailing SL: +₹2 on target, then +₹1 per +₹1 rise) / Stop Loss (-₹1)\n"
             f"───────────────────────────\n"
             f"Send `/morning` to run predictions, `/full_pipeline` for full cycle, or `/help` for commands."
         )

@@ -79,7 +79,9 @@ MAX_STOCK_PRICE = 500.0         # Maximum stock price (Rs. 500)
 INVESTMENT_PER_STOCK = 25000.0  # Assumed investment per stock (Rs. 25,000)
 PROFIT_TARGET_INR = 2.0         # Profit target (+Rs. 2) after 10:00 AM
 PRE_10AM_PROFIT_TARGET_INR = 10.0 # Profit target (+Rs. 10) before 10:00 AM
-STOP_LOSS_INR = 1.0             # Stop loss (-Rs. 1) after 10:00 AM
+STOP_LOSS_INR = 1.0             # Initial stop loss (-Rs. 1) after 10:00 AM
+TRAILING_SL_PUSH_INR = 2.0      # When target is reached, push stop loss by +Rs. 2 (from entry-1 to entry+1)
+TRAILING_SL_STEP_INR = 1.0      # For every +Rs. 1 increase after target, stop loss increases by Rs. 1
 
 DEFAULT_GAIN_TARGET_PCT = 2.0   # Minimum expected target gain % for model scoring
 DEFAULT_STOP_LOSS_PCT = 1.5    # Fallback risk stop loss %

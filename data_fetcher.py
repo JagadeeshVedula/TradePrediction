@@ -221,21 +221,31 @@ def evaluate_intraday_trade_1m(
     ticker: str,
     entry_price: float,
     target_date_str: str,
-    target_rupees: float = 1.0,
-    stop_loss_rupees: float = 3.0,
-    pre_10am_target_rupees: float = 10.0
+    target_rupees: float = 2.0,
+    stop_loss_rupees: float = 1.0,
+    pre_10am_target_rupees: float = 10.0,
+    trailing_sl_push: float = 2.0,
+    trailing_sl_step: float = 1.0
 ) -> Dict[str, Any]:
     """
     Evaluate intraday price action minute-by-minute against updated strategy rules:
     - Before 10:00 AM IST: Only sell if stock rises by +10 Rupees (EARLY_TARGET_MET).
-    - After 10:00 AM IST: Normal +1 Rupee Target & -3 Rupee Stop Loss rules apply.
+    - After 10:00 AM IST:
+      * When stock reaches target amount (+₹2, e.g. 400 -> 402):
+        Stop loss is pushed to +2 (from 399 -> 401, locking in profit).
+      * For every +₹1 increase in stock price (e.g. 403, 404):
+        Stop loss increases by 1 (e.g. 402, 403).
+      * If price hits trailing stop loss: Exits to lock in maximum profit.
+      * If stock does not reach target: Initial stop loss (-₹1, e.g. 399) triggers.
     Returns exact exit price, exit timestamp, exit reason, and per-share P&L.
     """
     ticker = normalize_ticker(ticker)
     ist = ZoneInfo("Asia/Kolkata")
     target_price = round(entry_price + target_rupees, 2)
     early_target_price = round(entry_price + pre_10am_target_rupees, 2)
-    stop_loss_price = round(entry_price - stop_loss_rupees, 2)
+    initial_stop_loss = round(entry_price - stop_loss_rupees, 2)
+    current_stop_loss = initial_stop_loss
+    target_hit = False
 
     now_ist = datetime.datetime.now(ist)
     today_str = now_ist.strftime('%Y-%m-%d')
@@ -275,10 +285,18 @@ def evaluate_intraday_trade_1m(
                 exit_price = early_target_price
                 exit_reason = f"EARLY_TARGET_MET (+₹{pre_10am_target_rupees:g})"
             elif high_p >= target_price:
-                exit_price = target_price
-                exit_reason = f"TARGET_MET (+₹{target_rupees:g})"
-            elif low_p <= stop_loss_price:
-                exit_price = stop_loss_price
+                steps = int(max(0.0, high_p - target_price))
+                trailing_sl = round(initial_stop_loss + trailing_sl_push + steps * trailing_sl_step, 2)
+                if low_p <= trailing_sl:
+                    exit_price = trailing_sl
+                    pnl_s = round(exit_price - entry_price, 2)
+                    exit_reason = f"TARGET_MET_TRAILING_STOP (+₹{pnl_s:g})"
+                else:
+                    exit_price = close_p
+                    pnl_s = round(exit_price - entry_price, 2)
+                    exit_reason = f"TARGET_MET_MARKET_CLOSE (+₹{pnl_s:g})"
+            elif low_p <= initial_stop_loss:
+                exit_price = initial_stop_loss
                 exit_reason = f"STOP_LOSS_HIT (-₹{stop_loss_rupees:g})"
             else:
                 exit_price = close_p
@@ -349,24 +367,52 @@ def evaluate_intraday_trade_1m(
                 exit_time = time_str
                 break
         else:
-            # After 10:00 AM IST: Target & Stop Loss rules
-            if bar_high >= target_price:
-                exit_price = target_price
-                exit_reason = f"TARGET_MET (+₹{target_rupees:g})"
-                exit_time = time_str
-                break
+            # After 10:00 AM IST: Trailing Stop Loss Strategy
+            # 1. Check if Target amount reached (e.g. 402 for 400 entry)
+            first_target_hit = False
+            if bar_high >= target_price or target_hit:
+                if not target_hit:
+                    target_hit = True
+                    first_target_hit = True
 
-            if bar_low <= stop_loss_price:
-                exit_price = stop_loss_price
-                exit_reason = f"STOP_LOSS_HIT (-₹{stop_loss_rupees:g})"
-                exit_time = time_str
-                break
+                # Target reached: stop loss is pushed to +2 (from 399 -> 401)
+                # and after that for every +1 increase, stop loss increases by 1 (e.g. 403 -> 402)
+                points_above_target = max(0.0, high_seen - target_price)
+                trailing_steps = int(points_above_target)
+                new_sl = round(initial_stop_loss + trailing_sl_push + trailing_steps * trailing_sl_step, 2)
+                current_stop_loss = max(current_stop_loss, new_sl)
+
+            # 2. Check Stop Loss Hit
+            sl_triggered = False
+            if target_hit:
+                # In trailing stop loss mode:
+                if first_target_hit:
+                    if bar_close <= current_stop_loss:
+                        sl_triggered = True
+                else:
+                    if bar_low <= current_stop_loss or bar_close <= current_stop_loss:
+                        sl_triggered = True
+
+                if sl_triggered:
+                    exit_price = current_stop_loss
+                    pnl_s = round(exit_price - entry_price, 2)
+                    exit_reason = f"TARGET_MET_TRAILING_STOP (+₹{pnl_s:g})"
+                    exit_time = time_str
+                    break
+            else:
+                # In initial stop loss mode (before target hit)
+                if bar_low <= current_stop_loss:
+                    exit_price = current_stop_loss
+                    exit_reason = f"STOP_LOSS_HIT (-₹{stop_loss_rupees:g})"
+                    exit_time = time_str
+                    break
 
     # If neither triggered during session, exit at final bar close
     if exit_price is None:
         last_row = matching_bars.iloc[-1]
         exit_price = round(_to_scalar(last_row['Close']), 2)
-        exit_reason = "MARKET_CLOSE"
+        pnl_s = round(exit_price - entry_price, 2)
+        exit_reason = f"TARGET_MET_MARKET_CLOSE (+₹{pnl_s:g})" if target_hit else "MARKET_CLOSE"
         exit_time = "15:30"
 
     pnl_per_share = round(exit_price - entry_price, 2)

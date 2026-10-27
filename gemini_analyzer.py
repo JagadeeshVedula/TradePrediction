@@ -161,7 +161,7 @@ Your task is to select the TOP 5 INDIAN STOCKS (< ₹500) with the HIGHEST CONFI
 - Assumed Capital Allocation: ₹25,000 per stock.
 - Exit Strategy:
   * Pre-10:00 AM IST: Early target profit exit at +₹10.00 gain per share.
-  * Post-10:00 AM IST: Standard profit target at +₹{PROFIT_TARGET_INR:.2f} gain per share; Stop-Loss at -₹{STOP_LOSS_INR:.2f} per share.
+  * Post-10:00 AM IST: Target at +₹{PROFIT_TARGET_INR:.2f} gain per share; upon reaching target, Stop-Loss is pushed to +₹2 (locking +₹1 profit) and trails +₹1 for every +₹1 increase in stock price. Initial Stop-Loss is -₹{STOP_LOSS_INR:.2f} per share.
 
 ### GLOBAL MARKET CUES (US & SINGAPORE / ASIA):
 {market_context.get("summary_text", "US and Asian indices mixed.")}
@@ -176,7 +176,7 @@ Overall Global Tone: {market_context.get("overall_tone", "NEUTRAL")}
 ### INSTRUCTIONS:
 1. Synthesize Global Cues: Evaluate how US market close (S&P 500, Nasdaq, Dow Jones) and Singapore Straits Times / Asian cues influence Indian sectors (e.g. Metals, Banking, Energy, PSU, Infra, Tech).
 2. Filter & Eliminate Risks: Drop candidates that face adverse news or high downside volatility that could hit the -₹{STOP_LOSS_INR:.2f} stop loss.
-3. Select the TOP 5 Highest-Confidence Winners: Pick the 5 stocks with the strongest catalyst alignment (Technical breakout + volume + macro/news tailwind) to achieve +₹2.00 target or early +₹10.00 target.
+3. Select the TOP 5 Highest-Confidence Winners: Pick the 5 stocks with the strongest catalyst alignment (Technical breakout + volume + macro/news tailwind) to achieve +₹{PROFIT_TARGET_INR:.2f} target (with upside trailing stop profit) or early +₹10.00 target.
 4. Assign an AI Confidence Score: Must be between 82.0% and 98.0% based on conviction.
 5. Provide a crisp, high-impact `signal_reasons` for each (15-20 words max highlighting catalyst, news link, and technical momentum).
 

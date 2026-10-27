@@ -46,7 +46,7 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         lines.append("───────────────────────────")
 
     lines.append("💼 *Investment Rules:* Assumed ₹25,000 on each stock (Total: ₹1,25,000)")
-    lines.append(f"🎯 *Exit Strategy:* Pre-10:00 AM Sell on +₹10.00 | Post-10:00 AM Target +₹{PROFIT_TARGET_INR:.2f} / Stop Loss -₹{STOP_LOSS_INR:.2f}")
+    lines.append(f"🎯 *Exit Strategy:* Pre-10:00 AM Sell on +₹10.00 | Post-10:00 AM Target +₹{PROFIT_TARGET_INR:.2f} (Trailing SL: +₹2 push on target, then +₹1 per +₹1 rise) / Stop Loss -₹{STOP_LOSS_INR:.2f}")
     lines.append("───────────────────────────")
     lines.append("")
 
@@ -72,8 +72,8 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         lines.append(f"  • *Entry Price:* {curr}{start_p:.2f} (< ₹500)")
         lines.append(f"  • *Shares Quantity:* {qty} shares")
         lines.append(f"  • *Capital Invested:* {curr}{inv_amt:,.2f}")
-        lines.append(f"  • *Target Sell Price:* {curr}{target_p:.2f} (+₹{PROFIT_TARGET_INR:.2f})")
-        lines.append(f"  • *Stop Loss Price:* {curr}{stop_l:.2f} (-₹{STOP_LOSS_INR:.2f})")
+        lines.append(f"  • *Target Price:* {curr}{target_p:.2f} (+₹{PROFIT_TARGET_INR:.2f} ➔ Trailing SL activates)")
+        lines.append(f"  • *Initial Stop Loss:* {curr}{stop_l:.2f} (-₹{STOP_LOSS_INR:.2f})")
         lines.append(f"  • *AI Confidence:* {conf_badge}")
         lines.append(f"  • *Key Signals:* _{reasons}_")
         lines.append("")
@@ -134,7 +134,12 @@ def generate_evening_report_markdown(date_str: str, summary: Dict[str, Any]) -> 
                 status_badge = "🚀 *PRE-10AM EARLY TARGET HIT (+₹10.00)*"
                 targets_met_count += 1
             elif "TARGET" in exit_reason:
-                status_badge = f"🎯 *TARGET HIT (+₹{PROFIT_TARGET_INR:.2f})*"
+                if "TRAILING" in exit_reason:
+                    status_badge = f"🎯 *TARGET HIT (TRAILING STOP SOLD @ {curr}{exit_p:.2f} | +₹{pnl_share:.2f})*"
+                elif "MARKET_CLOSE" in exit_reason:
+                    status_badge = f"🎯 *TARGET MET (HELD TO EOD @ {curr}{exit_p:.2f} | +₹{pnl_share:.2f})*"
+                else:
+                    status_badge = f"🎯 *TARGET HIT (+₹{pnl_share:.2f})*"
                 targets_met_count += 1
             elif "STOP_LOSS" in exit_reason:
                 status_badge = f"🔴 *STOP-LOSS HIT (-₹{STOP_LOSS_INR:.2f})*"

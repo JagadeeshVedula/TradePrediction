@@ -14,11 +14,12 @@ Hosted on **Supabase (PostgreSQL Database & Storage)** and scheduled via **GitHu
    - Scrapes live financial news from **Moneycontrol** & **Times of India** pre-market feeds.
    - Leverages **Google Gemini 2.5 Flash AI** to combine macroeconomic cues, domestic news catalysts, and technical indicators to pick the **Top 5 highest confidence stocks**.
    - Calculates target prices (+₹2.00 / pre-10am +₹10.00), stop losses (-₹1.00), and capital allocations (₹25,000 per stock).
+   - **Trailing Stop Loss Strategy**: When a stock reaches its target amount (+₹2.00, e.g. Open @ 400 ➔ Target @ 402, Initial SL @ 399), the stop loss is pushed to +2 (moved to 401, locking in profit). After that, for every +1 increase in stock price (e.g. 403, 404), the stop loss moves up by 1 (402, 403), locking in higher profits on rallies.
 
 2. **🌆 Evening Close Analysis**:
    - Downloads post-close actual market prices and 1-minute tick actions.
    - Computes share-by-share profit and loss breakdown against morning predictions.
-   - Evaluates whether targets (+₹2/+₹10) or stop losses (-₹1) were triggered.
+   - Evaluates whether trailing stop loss (or pre-10am +₹10 / initial -₹1 stop loss) was triggered.
 
 3. **🤖 Interactive Telegram Bot with Start/Stop Pipeline Controls**:
    - `/morning` — Trigger Morning Predictions immediately with Gemini AI & Global News analysis.

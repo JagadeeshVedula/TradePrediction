@@ -75,6 +75,7 @@ async function handleTelegramUpdate(update, env, botToken, githubToken = '') {
 
   let cmd = text.split(' ')[0].toLowerCase().split('@')[0];
   if (cleanLower.includes('morning') && !cmd.startsWith('/')) cmd = '/morning';
+  else if ((cleanLower.includes('analysis') || cleanLower.includes('gemini')) && !cmd.startsWith('/')) cmd = '/analysis';
   else if (cleanLower.includes('evening') && !cmd.startsWith('/')) cmd = '/evening';
   else if (cleanLower.includes('status') && !cmd.startsWith('/')) cmd = '/status';
   else if (cleanLower.includes('news') && !cmd.startsWith('/')) cmd = '/news';
@@ -121,6 +122,27 @@ async function handleTelegramUpdate(update, env, botToken, githubToken = '') {
       botToken
     );
     await triggerGitHubWorkflow(chatId, env, botToken, 'morning', githubToken);
+  } else if (cmd === '/analysis' || cmd === '/gemini_analysis' || cmd === '/gemini') {
+    await sendTelegramMessage(
+      chatId,
+      '🧠 *Triggering Gemini AI Deep Stock Analysis in GitHub Actions Cloud!* ☁️\n' +
+      '───────────────────────────\n' +
+      '• Cloud runner is executing deep market synthesis...\n' +
+      '• Gemini 2.5 Flash is analyzing Top 5 stock selection bases & news impact.\n' +
+      '• Complete detailed report will arrive here in ~15-30 seconds!\n\n' +
+      '💡 *Your computer does NOT need to be on.*',
+      botToken
+    );
+    await triggerGitHubWorkflow(chatId, env, botToken, 'analysis', githubToken);
+  } else if (cmd === '/news') {
+    await sendTelegramMessage(
+      chatId,
+      '🌐 *Fetching Live US/Singapore Market Cues & Financial News...* 📰\n' +
+      '• Cloud runner is compiling latest headlines...\n' +
+      '• Report will arrive shortly.',
+      botToken
+    );
+    await triggerGitHubWorkflow(chatId, env, botToken, 'news', githubToken);
   } else if (cmd === '/evening') {
     await sendTelegramMessage(
       chatId,
@@ -364,8 +386,10 @@ async function sendControlPanel(chatId, env, botToken) {
     'Operate your cloud trading pipeline directly from Telegram (No PC needed):\n\n' +
     '• 🌅 *Run Morning Prediction*: Triggers Gemini AI & Global News pipeline in GitHub Actions\n' +
     '• 🔄 *Full Pipeline (Full Cycle)*: Complete Morning + Intraday Tracking + Evening Report\n' +
+    '• 🧠 *Gemini AI Analysis*: Detailed selection bases, technical rationale & news impact for Top 5 stocks\n' +
     '• 🌆 *Evening Report*: Post-market close P&L breakdown\n' +
     '• 📊 *Pipeline Status*: Check GitHub Actions cloud runner status\n' +
+    '• 🌐 *Market News*: Live US & Singapore cues + Moneycontrol/TOI headlines\n' +
     '───────────────────────────\n' +
     '💡 *Tap any button below to trigger GitHub Actions immediately!*';
 
@@ -374,6 +398,10 @@ async function sendControlPanel(chatId, env, botToken) {
       [
         { text: '🌅 Morning Prediction', callback_data: '/morning' },
         { text: '🔄 Full Pipeline', callback_data: '/full_cycle' }
+      ],
+      [
+        { text: '🧠 Gemini AI Analysis', callback_data: '/analysis' },
+        { text: '🌐 Global News & Cues', callback_data: '/news' }
       ],
       [
         { text: '🌆 Evening P&L Report', callback_data: '/evening' },
@@ -385,7 +413,8 @@ async function sendControlPanel(chatId, env, botToken) {
   const replyKeyboard = {
     keyboard: [
       [{ text: '🌅 Morning Prediction' }, { text: '🔄 Full Pipeline' }],
-      [{ text: '🌆 Evening Report' }, { text: '📊 Pipeline Status' }],
+      [{ text: '🧠 Gemini Analysis' }, { text: '🌐 Market News' }],
+      [{ text: '🌆 Evening Report' }, { text: '📊 Status' }],
       [{ text: '🎛️ Menu' }]
     ],
     resize_keyboard: true,
@@ -401,15 +430,21 @@ async function sendFallbackMenu(chatId, receivedText, env, botToken) {
     `🤖 *Received:* \`${receivedText}\`\n\n` +
     'Tap any action below to execute in GitHub Actions Cloud:\n' +
     '• 🌅 `/morning` — Run Morning Prediction (< ₹500)\n' +
+    '• 🧠 `/analysis` — Gemini AI Stock Selection & News Analysis\n' +
     '• 🔄 `/full_pipeline` — Full Pipeline (Morning + Intraday + Evening Cycle)\n' +
     '• 🌆 `/evening` — Evening P&L & Retraining\n' +
-    '• 📊 `/status` — View GitHub Pipeline Runs';
+    '• 📊 `/status` — View GitHub Pipeline Runs\n' +
+    '• 🌐 `/news` — US & Singapore Cues + News';
 
   const inlineKeyboard = {
     inline_keyboard: [
       [
         { text: '🌅 Morning Prediction', callback_data: '/morning' },
         { text: '🔄 Full Pipeline', callback_data: '/full_cycle' }
+      ],
+      [
+        { text: '🧠 Gemini AI Analysis', callback_data: '/analysis' },
+        { text: '🌐 Global News & Cues', callback_data: '/news' }
       ],
       [
         { text: '🌆 Evening P&L Report', callback_data: '/evening' },

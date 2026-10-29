@@ -10,13 +10,15 @@ on:
         type: choice
         options:
           - morning
+          - analysis
+          - news
           - monitor
           - evening
           - full-cycle
           - train-initial
           - test-telegram
   repository_dispatch:
-    types: [telegram-command, morning, evening, monitor, full-cycle, full_cycle, full_pipeline]
+    types: [telegram-command, morning, analysis, news, evening, monitor, full-cycle, full_cycle, full_pipeline]
 
 jobs:
   run-stock-ai:
@@ -74,6 +76,10 @@ jobs:
             python main.py --mode evening
           elif [ "$MODE" = "morning" ]; then
             python main.py --mode morning --send-telegram
+          elif [ "$MODE" = "analysis" ] || [ "$MODE" = "gemini-analysis" ]; then
+            python main.py --mode analysis --send-telegram
+          elif [ "$MODE" = "news" ]; then
+            python main.py --mode news
           elif [ "$MODE" = "evening" ]; then
             python main.py --mode evening
           elif [ "$MODE" = "monitor" ]; then

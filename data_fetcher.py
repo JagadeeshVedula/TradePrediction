@@ -103,8 +103,17 @@ def fetch_latest_ticker_features(ticker: str, lookback_days: int = 120) -> Optio
             
         latest_row = df_clean.iloc[-1]
         
-        # Get starting (Open / Current) price
-        starting_price = _to_scalar(df['Open'].iloc[-1])
+        # Get starting price: prefer real-time fast_info last_price, fallback to daily Open/Close
+        starting_price = None
+        try:
+            fast_p = getattr(yf.Ticker(ticker).fast_info, 'last_price', None)
+            if fast_p and float(fast_p) > 0 and not pd.isna(fast_p):
+                starting_price = round(float(fast_p), 2)
+        except Exception:
+            pass
+
+        if not starting_price or starting_price <= 0:
+            starting_price = _to_scalar(df['Open'].iloc[-1])
         if pd.isna(starting_price) or starting_price <= 0:
             starting_price = _to_scalar(df['Close'].iloc[-1])
             

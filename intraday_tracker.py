@@ -108,7 +108,14 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
                 print(f"  • {ticker}: Waiting for 1m bar data...")
                 continue
 
-            last_row = df_1m.iloc[-1]
+            # Ensure 1m bar strictly matches the target date
+            df_1m.index = pd.to_datetime(df_1m.index)
+            today_bars = df_1m[df_1m.index.strftime('%Y-%m-%d') == date_str]
+            if today_bars.empty:
+                print(f"  • {ticker}: Waiting for today's ({date_str}) 1m bar data...")
+                continue
+
+            last_row = today_bars.iloc[-1]
             curr_price = round(_to_scalar(last_row['Close']), 2)
             bar_high = round(_to_scalar(last_row['High']), 2)
             bar_low = round(_to_scalar(last_row['Low']), 2)
@@ -125,6 +132,10 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
             early_target_price = round(pos['entry_price'] + PRE_10AM_PROFIT_TARGET_INR, 2)
 
             if is_before_10am:
+                # Track if +₹2 target was reached before 10 AM so trailing SL is primed for 10 AM
+                if bar_high >= pos['target_price']:
+                    pos['target_hit'] = True
+
                 # Before 10:00 AM IST: ONLY sell if stock rises by +10 Rupees
                 if bar_high >= early_target_price:
                     pos['status'] = 'CLOSED'

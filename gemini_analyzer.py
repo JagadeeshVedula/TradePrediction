@@ -189,7 +189,9 @@ Return ONLY a valid JSON array of exactly 5 objects in this structure:
     "confidence_score": 94.5,
     "expected_gain_pct": 2.8,
     "signal_reasons": "US metal rally tailwind + Heavy volume breakout & Bullish MACD crossover",
-    "catalyst": "Global commodity rally & domestic PSU demand"
+    "catalyst": "Global commodity rally & domestic PSU demand",
+    "selection_basis": "Bullish technical setup with 1.4x volume surge, expanding MACD histogram, and strong support at entry. Chosen over other candidates due to high risk-reward ratio.",
+    "news_impact": "Boosted by overnight surge in global metal indices and increased domestic infrastructure allocations reported in Economic Times."
   }},
   ...
 ]
@@ -230,6 +232,8 @@ Return ONLY a valid JSON array of exactly 5 objects in this structure:
             exp_gain = float(item.get("expected_gain_pct", base_cand.get("expected_gain_pct", 2.0)))
             qty = base_cand.get("quantity", max(1, int(INVESTMENT_PER_STOCK / start_p)))
             inv_amt = round(qty * start_p, 2)
+            sel_basis = item.get("selection_basis") or f"Bullish technical indicators aligned with {catalyst or 'sectoral momentum'}."
+            news_imp = item.get("news_impact") or ("; ".join(base_cand.get("recent_news", [])) if base_cand.get("recent_news") else "Benefiting from positive broader market sentiment.")
 
             final_picks.append({
                 "rank": len(final_picks) + 1,
@@ -242,6 +246,9 @@ Return ONLY a valid JSON array of exactly 5 objects in this structure:
                 "quantity": qty,
                 "invested_amount": inv_amt,
                 "signal_reasons": reasons,
+                "selection_basis": sel_basis,
+                "news_impact": news_imp,
+                "catalyst": catalyst,
                 "gemini_selected": True
             })
 
@@ -297,3 +304,159 @@ def generate_macro_briefing_markdown(market_context: Dict[str, Any]) -> str:
             lines.append(f"  • _{n['title']}_")
     
     return "\n".join(lines)
+
+
+def generate_gemini_analysis_markdown(
+    date_str: str,
+    predictions: List[Dict[str, Any]],
+    market_context: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Generate comprehensive, transparent deep-dive report on:
+    - On what bases Gemini AI selected the Top 5 Indian stocks (< ₹500)
+    - How global market cues and domestic financial news impacted them
+    - Full quantitative and fundamental risk-reward breakdown
+    """
+    if not market_context:
+        from market_news import get_market_context_summary
+        market_context = get_market_context_summary()
+
+    lines = []
+    lines.append("🧠 *GOOGLE GEMINI AI — DEEP STOCK SELECTION ANALYSIS* 🚀")
+    lines.append(f"📅 *Date:* `{date_str}` | *Universe:* Indian Stocks (< ₹500)")
+    lines.append("───────────────────────────")
+
+    # Section 1: Global Market Cues & Macro Tone
+    tone = market_context.get("overall_tone", "NEUTRAL")
+    tone_emoji = "🟢 BULLISH" if tone == "BULLISH" else ("🔴 BEARISH" if tone == "BEARISH" else "🟡 MIXED / NEUTRAL")
+    lines.append(f"🌐 *GLOBAL CUES & PRE-MARKET MACRO TONE:* {tone_emoji}")
+    cues_summary = market_context.get("summary_text", "")
+    if cues_summary:
+        lines.append(cues_summary)
+    else:
+        lines.append("US & Asian indices mixed; domestic liquidity positive.")
+    lines.append("")
+
+    # Section 2: Domestic Financial News Landscape
+    news_items = market_context.get("news_items", [])
+    if news_items:
+        lines.append("📰 *DOMESTIC NEWS HEADLINES (Moneycontrol & TOI):*")
+        for item in news_items[:3]:
+            lines.append(f"  • *[{item['source']}]* _{item['title']}_")
+        lines.append("")
+
+    lines.append("───────────────────────────")
+    lines.append("🎯 *TOP 5 PICKS — SELECTION BASES & NEWS IMPACT:*")
+    lines.append("───────────────────────────")
+
+    rank_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+
+    for idx, p in enumerate(predictions):
+        rank_icon = rank_emojis[idx] if idx < len(rank_emojis) else f"#{idx+1}"
+        ticker = p.get('ticker', '')
+        start_p = p.get('starting_price', 0.0)
+        target_p = p.get('target_price', start_p + PROFIT_TARGET_INR)
+        stop_l = p.get('stop_loss', start_p - STOP_LOSS_INR)
+        conf = p.get('confidence_score', 85.0)
+        exp_gain = p.get('expected_gain_pct', 2.0)
+        qty = p.get('quantity', max(1, int(INVESTMENT_PER_STOCK / start_p))) if start_p > 0 else 0
+        inv_amt = p.get('invested_amount', round(qty * start_p, 2))
+
+        # Bases & News data
+        sel_basis = p.get('selection_basis') or p.get('signal_reasons') or "Strong technical alignment across MACD, volume, and momentum indicators."
+        news_imp = p.get('news_impact') or "Supported by domestic sector resilience and positive fund flows."
+        catalyst = p.get('catalyst') or ""
+
+        conf_badge = f"🔥 *{conf:.1f}% Conviction*" if conf >= 90 else f"⭐ *{conf:.1f}% Conviction*"
+
+        lines.append(f"{rank_icon} *{ticker}*  {conf_badge}")
+        lines.append(f"  • *Key Metrics:* Entry: ₹{start_p:.2f} | Target: ₹{target_p:.2f} (+₹{PROFIT_TARGET_INR:.2f}) | Initial SL: ₹{stop_l:.2f}")
+        lines.append(f"  • *Position Size:* {qty} shares (Allocated: ₹{inv_amt:,.2f} | Exp. Gain: +{exp_gain:.2f}%)")
+        if catalyst:
+            lines.append(f"  • ⚡ *Primary Catalyst:* _{catalyst}_")
+        lines.append(f"  • 📊 *Selection Basis (Why Gemini Chose It):*")
+        lines.append(f"    {sel_basis}")
+        lines.append(f"  • 📰 *News Impact & Market Influence:*")
+        lines.append(f"    {news_imp}")
+        lines.append("")
+
+    lines.append("───────────────────────────")
+    lines.append("⚙️ *SELECTION METHODOLOGY TRANSPARENCY:*")
+    lines.append("1. *Universe Filter:* Screened all liquid NSE stocks priced under ₹500.")
+    lines.append("2. *Quantitative ML Model:* Screened technical indicators (RSI, MACD, 20-day Volume, ATR, Momentum).")
+    lines.append("3. *Macro & News Ingestion:* Live US/Asian index cues and RSS news headlines fed into Gemini 2.5 Flash.")
+    lines.append("4. *AI Synthesis:* Gemini analyzed news tailwinds vs downside volatility risk to pick the Top 5.")
+    lines.append("5. *Intraday Trade Rules:* Assumed ₹25k allocation; Pre-10:00 AM target +₹10; Post-10:00 AM +₹2 target with +₹1 trailing stop.")
+
+    return "\n".join(lines)
+
+
+def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
+    """
+    Produce and return Gemini Deep Analysis report for a given date.
+    Pulls existing predictions from database or runs fresh analysis.
+    """
+    import datetime
+    from zoneinfo import ZoneInfo
+    from database import get_predictions_by_date
+    from market_news import get_market_context_summary
+
+    if not date_str:
+        date_str = datetime.date.today().strftime("%Y-%m-%d")
+
+    predictions = get_predictions_by_date(date_str)
+    market_context = get_market_context_summary()
+
+    # If predictions exist and have selection_basis
+    if predictions and any(p.get("selection_basis") for p in predictions):
+        return generate_gemini_analysis_markdown(date_str, predictions, market_context)
+
+    # If predictions exist but lack detailed selection_basis, ask Gemini to enrich them
+    api_key = get_gemini_api_key()
+    if predictions and is_gemini_configured():
+        prompt = f"""
+You are an expert Dalal Street stock strategist. Explain in detail the exact selection bases and news impact for these Top 5 Indian stocks (< ₹500) predicted for trading on {date_str}:
+
+STOCKS:
+{json.dumps([{ 'ticker': p['ticker'], 'starting_price': p['starting_price'], 'signal_reasons': p.get('signal_reasons', '') } for p in predictions], indent=2)}
+
+GLOBAL CUES:
+{market_context.get('summary_text', '')}
+
+DOMESTIC NEWS:
+{market_context.get('formatted_news_text', '')}
+
+For EACH stock, return a JSON array with:
+- "ticker": ticker
+- "selection_basis": 2-3 sentences explaining technical reasons (momentum, volume, price support) and why chosen over other stocks
+- "news_impact": 1-2 sentences explaining specific company or sectoral news impacting it today
+- "catalyst": crisp 4-6 word catalyst phrase
+
+Return ONLY valid JSON array.
+"""
+        resp = _call_gemini_api(prompt, api_key)
+        parsed = _extract_json_from_response(resp) if resp else None
+        if parsed and isinstance(parsed, list):
+            parsed_map = {item["ticker"]: item for item in parsed if "ticker" in item}
+            for p in predictions:
+                t = p["ticker"]
+                info = parsed_map.get(t) or parsed_map.get(t.replace(".NS", ""))
+                if info:
+                    p["selection_basis"] = info.get("selection_basis", p.get("signal_reasons", ""))
+                    p["news_impact"] = info.get("news_impact", "Supported by sectoral news flow.")
+                    p["catalyst"] = info.get("catalyst", "")
+
+            return generate_gemini_analysis_markdown(date_str, predictions, market_context)
+
+    # Fallback: if no predictions recorded yet, run predictor to generate them
+    from ml_model import TechStockPredictor
+    from config import DEFAULT_TECH_TICKERS
+    predictor = TechStockPredictor()
+    top_5 = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
+    if top_5:
+        from database import save_predictions
+        save_predictions(date_str, top_5)
+        return generate_gemini_analysis_markdown(date_str, top_5, getattr(predictor, "last_market_context", market_context))
+
+    return "⚠️ Could not generate Gemini Deep Analysis. Please check market data connection or run /morning first."
+

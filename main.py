@@ -20,9 +20,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Top 5 Indian Stocks (< ₹500) Gain Predictor & Intraday 1m Tracker System")
     parser.add_argument(
         "--mode",
-        choices=["morning", "evening", "monitor", "train-initial", "test-telegram", "get-chats", "full-cycle", "full_cycle", "full_pipeline", "telegram-bot", "news"],
+        choices=["morning", "evening", "monitor", "analysis", "gemini-analysis", "train-initial", "test-telegram", "get-chats", "full-cycle", "full_cycle", "full_pipeline", "telegram-bot", "news"],
         default="morning",
-        help="Operation mode: 'morning', 'evening', 'monitor', 'telegram-bot', 'news', 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle' ('full_pipeline')"
+        help="Operation mode: 'morning', 'evening', 'monitor', 'analysis', 'gemini-analysis', 'telegram-bot', 'news', 'train-initial', 'test-telegram', 'get-chats', or 'full-cycle' ('full_pipeline')"
     )
     parser.add_argument(
         "--date",
@@ -127,6 +127,18 @@ def run_full_cycle_mode(date_str: str, send_telegram: bool = True, target_chat_i
     print("🌆 Phase 3: Generating Evening P&L Report & Retraining ML Model...")
     run_evening_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
 
+def run_analysis_mode(date_str: str, send_telegram: bool = True, target_chat_id: Optional[str] = None):
+    """Generate and send transparent Gemini AI Deep Selection & News Impact Analysis."""
+    print(f"🧠 Generating Gemini AI Deep Stock Selection & News Impact Analysis for {date_str}...")
+    init_db()
+    from gemini_analyzer import run_gemini_deep_analysis
+    report = run_gemini_deep_analysis(date_str)
+    print("\n" + report + "\n")
+    if send_telegram:
+        print("📤 Sending Gemini Deep Analysis to Telegram Channel...")
+        send_telegram_message(report, target_chat_id=target_chat_id)
+    return report
+
 def main():
     args = parse_args()
     date_str = args.date
@@ -135,6 +147,8 @@ def main():
         run_train_initial()
     elif args.mode == "morning":
         run_morning_mode(date_str, send_telegram=args.send_telegram)
+    elif args.mode in ["analysis", "gemini-analysis"]:
+        run_analysis_mode(date_str, send_telegram=True)
     elif args.mode == "evening":
         run_evening_mode(date_str, send_telegram=True)
     elif args.mode == "monitor":

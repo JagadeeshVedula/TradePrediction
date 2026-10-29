@@ -86,6 +86,10 @@ def init_db():
             cursor.execute("ALTER TABLE predictions ADD COLUMN quantity INTEGER DEFAULT 0")
         if "invested_amount" not in pred_cols:
             cursor.execute("ALTER TABLE predictions ADD COLUMN invested_amount REAL DEFAULT 0.0")
+        if "selection_basis" not in pred_cols:
+            cursor.execute("ALTER TABLE predictions ADD COLUMN selection_basis TEXT")
+        if "news_impact" not in pred_cols:
+            cursor.execute("ALTER TABLE predictions ADD COLUMN news_impact TEXT")
 
         cursor.execute("PRAGMA table_info(outcomes)")
         out_cols = [col[1] for col in cursor.fetchall()]
@@ -128,7 +132,7 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
             sb.table("predictions").delete().eq("date", date_str).execute()
             records = []
             for p in predictions:
-                records.append({
+                rec = {
                     'date': date_str,
                     'ticker': p['ticker'],
                     'rank': p['rank'],
@@ -140,7 +144,12 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
                     'signal_reasons': p.get('signal_reasons', ''),
                     'quantity': int(p.get('quantity', 0)),
                     'invested_amount': float(p.get('invested_amount', 0.0))
-                })
+                }
+                if p.get('selection_basis'):
+                    rec['selection_basis'] = p['selection_basis']
+                if p.get('news_impact'):
+                    rec['news_impact'] = p['news_impact']
+                records.append(rec)
             if records:
                 sb.table("predictions").insert(records).execute()
             print(f"☁️ Saved {len(records)} predictions to Supabase for date {date_str}.")
@@ -156,8 +165,8 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
         for p in predictions:
             cursor.execute('''
                 INSERT INTO predictions 
-                (date, ticker, rank, starting_price, expected_gain_pct, target_price, stop_loss, confidence_score, signal_reasons, quantity, invested_amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date, ticker, rank, starting_price, expected_gain_pct, target_price, stop_loss, confidence_score, signal_reasons, quantity, invested_amount, selection_basis, news_impact)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 date_str,
                 p['ticker'],
@@ -169,7 +178,9 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
                 p['confidence_score'],
                 p.get('signal_reasons', ''),
                 p.get('quantity', 0),
-                p.get('invested_amount', 0.0)
+                p.get('invested_amount', 0.0),
+                p.get('selection_basis', ''),
+                p.get('news_impact', '')
             ))
         conn.commit()
 

@@ -109,11 +109,14 @@ def get_control_panel_inline_markup() -> Dict[str, Any]:
                 {"text": "🔄 Full Pipeline (Cycle)", "callback_data": "/full_cycle"}
             ],
             [
+                {"text": "🧠 Gemini AI Analysis", "callback_data": "/analysis"},
+                {"text": "🌐 Global News & Cues", "callback_data": "/news"}
+            ],
+            [
                 {"text": "🌆 Evening P&L Report", "callback_data": "/evening"},
                 {"text": "📊 Pipeline Status", "callback_data": "/status"}
             ],
             [
-                {"text": "🌐 Global News & Cues", "callback_data": "/news"},
                 {"text": "⏸️ Pause Pipeline", "callback_data": "/stop_pipeline"}
             ]
         ]
@@ -124,8 +127,9 @@ def get_persistent_reply_keyboard_markup() -> Dict[str, Any]:
     return {
         "keyboard": [
             [{"text": "🌅 Morning Prediction"}, {"text": "🔄 Full Pipeline"}],
+            [{"text": "🧠 Gemini Analysis"}, {"text": "🌐 Market News"}],
             [{"text": "🌆 Evening Report"}, {"text": "📊 Status"}],
-            [{"text": "🌐 Market News"}, {"text": "🎛️ Menu"}]
+            [{"text": "🎛️ Menu"}]
         ],
         "resize_keyboard": True,
         "is_persistent": True
@@ -139,6 +143,7 @@ def send_control_panel(chat_id: str):
         "Use the buttons below to operate the automated trading pipeline:\n\n"
         "• 🌅 *Run Morning Prediction*: Analyze Indian stocks (< ₹500) with Gemini AI & Global News\n"
         "• 🔄 *Full Pipeline (Full Cycle)*: Run Complete Cycle (Morning Prediction + 1m Intraday Tracker + Evening Report)\n"
+        "• 🧠 *Gemini AI Analysis*: Complete breakdown of selection bases, technical rationale & news impact for Top 5 stocks\n"
         "• 🌆 *Evening Report*: Post-market close P&L breakdown per share\n"
         "• 📊 *Pipeline Status*: View active state & Gemini connection\n"
         "• 🌐 *Market News*: Live US & Singapore cues + Moneycontrol/TOI headlines\n"
@@ -158,6 +163,7 @@ def register_bot_commands() -> bool:
         return False
     commands = [
         {"command": "morning", "description": "🌅 Run Morning Prediction (< ₹500)"},
+        {"command": "analysis", "description": "🧠 View Gemini AI Stock Selection & News Impact"},
         {"command": "full_pipeline", "description": "🔄 Run Full Pipeline Cycle (Morning + Monitor + Evening)"},
         {"command": "evening", "description": "🌆 Run Evening P&L Report & Retraining"},
         {"command": "status", "description": "📊 Check Pipeline State & Gemini Status"},
@@ -250,6 +256,25 @@ def _execute_news_command(chat_id: str):
     except Exception as e:
         send_telegram_message(f"❌ Error fetching news cues: {e}", target_chat_id=chat_id)
 
+def _execute_analysis_command(chat_id: str):
+    """Worker to generate and send Gemini Deep Analysis on Top 5 picks and news impact."""
+    from gemini_analyzer import run_gemini_deep_analysis
+    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    send_telegram_message(
+        f"🧠 *Fetching Google Gemini AI Deep Stock Analysis for {date_str}...* 🔍\n"
+        f"───────────────────────────\n"
+        f"• Reviewing selection bases for Top 5 stocks (< ₹500)\n"
+        f"• Synthesizing global market cues (US & Singapore) and domestic headlines\n"
+        f"• Compiling news impact & technical indicators for each stock\n\n"
+        f"⏳ Processing now with Gemini 2.5 Flash. Please wait ~10-15s...",
+        target_chat_id=chat_id
+    )
+    try:
+        report = run_gemini_deep_analysis(date_str)
+        send_telegram_message(report, target_chat_id=chat_id)
+    except Exception as e:
+        send_telegram_message(f"❌ Error generating Gemini analysis: {e}", target_chat_id=chat_id)
+
 def handle_telegram_callback_query(cq: dict):
     """Handle click events on inline keyboard buttons."""
     cq_id = cq.get("id")
@@ -289,6 +314,8 @@ def handle_telegram_message(msg: dict):
     clean_lower = text.lower()
     if "morning" in clean_lower and not cmd.startswith("/"):
         cmd = "/morning"
+    elif ("analysis" in clean_lower or "gemini" in clean_lower) and not cmd.startswith("/"):
+        cmd = "/analysis"
     elif "status" in clean_lower and not cmd.startswith("/"):
         cmd = "/status"
     elif (
@@ -319,6 +346,9 @@ def handle_telegram_message(msg: dict):
 
     elif cmd == "/morning":
         threading.Thread(target=_execute_morning_command, args=(chat_id,), daemon=True).start()
+
+    elif cmd in ["/analysis", "/gemini_analysis", "/gemini", "/deep_analysis"]:
+        threading.Thread(target=_execute_analysis_command, args=(chat_id,), daemon=True).start()
 
     elif cmd == "/evening":
         threading.Thread(target=_execute_evening_command, args=(chat_id,), daemon=True).start()
@@ -359,7 +389,7 @@ def handle_telegram_message(msg: dict):
             f"🎯 *Universe:* Top Indian Stocks < ₹500 (Assumed ₹25k Allocation per Stock)\n"
             f"⚡ *Strategy:* Pre-10am (+₹10) | Post-10am Target (+₹2, Trailing SL: +₹2 on target, then +₹1 per +₹1 rise) / Stop Loss (-₹1)\n"
             f"───────────────────────────\n"
-            f"Send `/morning` to run predictions, `/full_pipeline` for full cycle, or `/help` for commands."
+            f"Send `/morning` to run predictions, `/analysis` for Gemini deep dive, `/full_pipeline` for full cycle, or `/help` for commands."
         )
         send_telegram_message(status_msg, target_chat_id=chat_id)
 
@@ -388,6 +418,7 @@ def handle_telegram_message(msg: dict):
             f"🤖 *Received:* `{text}`\n\n"
             "Here are the available actions:\n"
             "• 🌅 `/morning` — Run Morning Prediction (< ₹500)\n"
+            "• 🧠 `/analysis` — Gemini AI Stock Selection & News Analysis\n"
             "• 🔄 `/full_pipeline` — Run Full Pipeline (Morning + 1m Monitor + Evening)\n"
             "• 🌆 `/evening` — Evening P&L & Retraining\n"
             "• 📊 `/status` — View Pipeline & AI Status\n"

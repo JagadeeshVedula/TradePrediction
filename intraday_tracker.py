@@ -2,6 +2,7 @@ import time
 import datetime
 import sys
 from typing import Dict, Any, List
+import pandas as pd
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')

@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import sys
+from zoneinfo import ZoneInfo
 
 # Ensure UTF-8 output encoding for Windows PowerShell consoles
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
@@ -8,7 +9,7 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-from config import DEFAULT_TECH_TICKERS
+from config import DEFAULT_TECH_TICKERS, TOP_N_PREDICTIONS
 from database import init_db, save_predictions, save_outcomes
 
 from ml_model import TechStockPredictor
@@ -17,7 +18,7 @@ from telegram_bot import send_telegram_message, test_telegram_connection, get_te
 from intraday_tracker import run_intraday_1m_tracker
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Top 5 Indian Stocks (< ₹500) Gain Predictor & Intraday 1m Tracker System")
+    parser = argparse.ArgumentParser(description=f"Top {TOP_N_PREDICTIONS} Indian Stocks (< ₹500) Gain Predictor & Intraday 1m Tracker System")
     parser.add_argument(
         "--mode",
         choices=["morning", "evening", "monitor", "analysis", "gemini-analysis", "train-initial", "test-telegram", "get-chats", "full-cycle", "full_cycle", "full_pipeline", "telegram-bot", "news"],
@@ -27,8 +28,8 @@ def parse_args():
     parser.add_argument(
         "--date",
         type=str,
-        default=datetime.date.today().strftime("%Y-%m-%d"),
-        help="Target date in YYYY-MM-DD format (default: today)"
+        default=datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d"),
+        help="Target date in YYYY-MM-DD format (default: today IST)"
     )
     parser.add_argument(
         "--send-telegram",
@@ -51,19 +52,19 @@ def run_morning_mode(date_str: str, send_telegram: bool = False, target_chat_id:
     init_db()
     predictor = TechStockPredictor()
     
-    top_5 = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
-    if not top_5:
+    top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
+    if not top_picks:
         print("❌ Could not generate predictions. Check internet connection or stock tickers.")
         return
 
     # Save to database
-    save_predictions(date_str, top_5)
-    print(f"💾 Top 5 predictions (< ₹500) saved to database for date {date_str}.")
+    save_predictions(date_str, top_picks)
+    print(f"💾 Top {len(top_picks)} predictions (< ₹500) saved to database for date {date_str}.")
 
     # Generate Morning Report with Global Cues and Gemini Insights
     report = generate_morning_report_markdown(
         date_str,
-        top_5,
+        top_picks,
         market_context=getattr(predictor, 'last_market_context', None)
     )
     print("\n" + report + "\n")

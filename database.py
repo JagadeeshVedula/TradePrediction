@@ -1,7 +1,7 @@
 import sqlite3
 import datetime
 from typing import List, Dict, Any, Optional
-from config import DB_PATH, SUPABASE_URL, SUPABASE_KEY
+from config import DB_PATH, SUPABASE_URL, SUPABASE_KEY, TOP_N_PREDICTIONS
 
 # Optional Supabase import for cloud hosting
 try:
@@ -151,7 +151,25 @@ def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
                     rec['news_impact'] = p['news_impact']
                 records.append(rec)
             if records:
-                sb.table("predictions").insert(records).execute()
+                try:
+                    sb.table("predictions").insert(records).execute()
+                except Exception as inner_e:
+                    # Retry with core schema columns in case custom columns don't exist yet on Supabase
+                    print(f"Notice: Supabase insert with extended columns failed ({inner_e}). Retrying with base columns...")
+                    base_records = []
+                    for r in records:
+                        base_records.append({
+                            'date': r['date'],
+                            'ticker': r['ticker'],
+                            'rank': r['rank'],
+                            'starting_price': r['starting_price'],
+                            'expected_gain_pct': r['expected_gain_pct'],
+                            'target_price': r['target_price'],
+                            'stop_loss': r['stop_loss'],
+                            'confidence_score': r['confidence_score'],
+                            'signal_reasons': r.get('signal_reasons', '')
+                        })
+                    sb.table("predictions").insert(base_records).execute()
             print(f"☁️ Saved {len(records)} predictions to Supabase for date {date_str}.")
             return
         except Exception as e:
@@ -189,7 +207,7 @@ def get_predictions_by_date(date_str: str) -> List[Dict[str, Any]]:
     sb = get_supabase_client()
     if sb:
         try:
-            res = sb.table("predictions").select("*").eq("date", date_str).order("rank", desc=False).limit(5).execute()
+            res = sb.table("predictions").select("*").eq("date", date_str).order("rank", desc=False).limit(TOP_N_PREDICTIONS).execute()
             if res.data:
                 return res.data
         except Exception as e:
@@ -200,9 +218,31 @@ def get_predictions_by_date(date_str: str) -> List[Dict[str, Any]]:
     with get_sqlite_connection() as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM predictions WHERE date = ? ORDER BY rank ASC LIMIT 5", (date_str,))
+        cursor.execute("SELECT * FROM predictions WHERE date = ? ORDER BY rank ASC LIMIT ?", (date_str, TOP_N_PREDICTIONS))
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+def get_latest_predictions() -> List[Dict[str, Any]]:
+    """Retrieve the most recent predictions recorded in database."""
+    sb = get_supabase_client()
+    if sb:
+        try:
+            res = sb.table("predictions").select("date").order("date", desc=True).limit(1).execute()
+            if res.data and len(res.data) > 0:
+                latest_date = res.data[0]['date']
+                return get_predictions_by_date(latest_date)
+        except Exception as e:
+            print(f"Error fetching latest predictions date from Supabase ({e}).")
+
+    init_db()
+    with get_sqlite_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT date FROM predictions ORDER BY date DESC LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            return get_predictions_by_date(row['date'])
+    return []
 
 def save_outcomes(date_str: str, outcomes: List[Dict[str, Any]]) -> None:
     """Save post-close market actual outcomes."""
@@ -232,7 +272,24 @@ def save_outcomes(date_str: str, outcomes: List[Dict[str, Any]]) -> None:
                     'pnl_pct': float(o.get('pnl_pct', 0.0))
                 })
             if records:
-                sb.table("outcomes").insert(records).execute()
+                try:
+                    sb.table("outcomes").insert(records).execute()
+                except Exception as inner_e:
+                    print(f"Notice: Supabase outcomes insert with extended columns failed ({inner_e}). Retrying with core columns...")
+                    core_records = []
+                    for r in records:
+                        core_records.append({
+                            'date': r['date'],
+                            'ticker': r['ticker'],
+                            'starting_price': r['starting_price'],
+                            'close_price': r['close_price'],
+                            'high_price': r['high_price'],
+                            'low_price': r['low_price'],
+                            'actual_gain_pct': r['actual_gain_pct'],
+                            'max_gain_pct': r['max_gain_pct'],
+                            'status': r['status']
+                        })
+                    sb.table("outcomes").insert(core_records).execute()
             print(f"☁️ Saved {len(records)} outcomes to Supabase for date {date_str}.")
             return
         except Exception as e:

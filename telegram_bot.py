@@ -143,7 +143,7 @@ def send_control_panel(chat_id: str):
         "Use the buttons below to operate the automated trading pipeline:\n\n"
         "• 🌅 *Run Morning Prediction*: Analyze Indian stocks (< ₹500) with Gemini AI & Global News\n"
         "• 🔄 *Full Pipeline (Full Cycle)*: Run Complete Cycle (Morning Prediction + 1m Intraday Tracker + Evening Report)\n"
-        "• 🧠 *Gemini AI Analysis*: Complete breakdown of selection bases, technical rationale & news impact for Top 5 stocks\n"
+        "• 🧠 *Gemini AI Analysis*: Complete breakdown of selection bases, technical rationale & news impact for Top 2 stocks\n"
         "• 🌆 *Evening Report*: Post-market close P&L breakdown per share\n"
         "• 📊 *Pipeline Status*: View active state & Gemini connection\n"
         "• 🌐 *Market News*: Live US & Singapore cues + Moneycontrol/TOI headlines\n"
@@ -189,7 +189,8 @@ def register_bot_commands() -> bool:
 def _execute_morning_command(chat_id: str):
     """Worker to run morning prediction and reply directly to the requester."""
     import main
-    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
     send_telegram_message(
         f"⏳ *Running Morning Prediction for {date_str}...*\n"
         f"🔍 Fetching US Market Close (S&P/Nasdaq/Dow), Singapore Straits Times, and Moneycontrol/TOI news.\n"
@@ -204,7 +205,8 @@ def _execute_morning_command(chat_id: str):
 def _execute_full_cycle_command(chat_id: str):
     """Worker to trigger full pipeline cycle (Morning + Monitor + Evening)."""
     import main
-    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
     send_telegram_message(
         f"🔄 *Starting Full Pipeline Cycle for {date_str}...* 🚀\n"
         f"───────────────────────────\n"
@@ -222,7 +224,8 @@ def _execute_full_cycle_command(chat_id: str):
 def _execute_evening_command(chat_id: str):
     """Worker to run evening report and reply directly to the requester."""
     import main
-    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
     send_telegram_message(
         f"⏳ *Generating Evening P&L Report for {date_str}...*\n"
         f"📊 Evaluating 1-minute intraday price action per share (+₹2 target with +₹1 Trailing SL / -₹1 initial SL) and retraining AI model...",
@@ -257,13 +260,14 @@ def _execute_news_command(chat_id: str):
         send_telegram_message(f"❌ Error fetching news cues: {e}", target_chat_id=chat_id)
 
 def _execute_analysis_command(chat_id: str):
-    """Worker to generate and send Gemini Deep Analysis on Top 5 picks and news impact."""
+    """Worker to generate and send Gemini Deep Analysis on Top 2 picks and news impact."""
     from gemini_analyzer import run_gemini_deep_analysis
-    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
     send_telegram_message(
         f"🧠 *Fetching Google Gemini AI Deep Stock Analysis for {date_str}...* 🔍\n"
         f"───────────────────────────\n"
-        f"• Reviewing selection bases for Top 5 stocks (< ₹500)\n"
+        f"• Reviewing selection bases for Top 2 stocks (< ₹500)\n"
         f"• Synthesizing global market cues (US & Singapore) and domestic headlines\n"
         f"• Compiling news impact & technical indicators for each stock\n\n"
         f"⏳ Processing now with Gemini 2.5 Flash. Please wait ~10-15s...",

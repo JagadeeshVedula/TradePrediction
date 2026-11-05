@@ -86,5 +86,5 @@ TRAILING_SL_STEP_INR = 1.0      # For every +Rs. 1 increase after target, stop l
 DEFAULT_GAIN_TARGET_PCT = 2.0   # Minimum expected target gain % for model scoring
 DEFAULT_STOP_LOSS_PCT = 1.5    # Fallback risk stop loss %
 LOOKBACK_DAYS = 60             # Days of historical market data for indicator computation
-TOP_N_PREDICTIONS = 5          # Number of top stocks to recommend daily
+TOP_N_PREDICTIONS = 2          # Number of top stocks to recommend daily (Top 2 highest accuracy)
 

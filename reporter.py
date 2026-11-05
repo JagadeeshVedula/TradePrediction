@@ -9,7 +9,7 @@ def _get_curr_symbol(ticker: str) -> str:
 def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, Any]], market_context: Optional[Dict[str, Any]] = None) -> str:
     """Generate detailed Morning Report formatted for Telegram and console."""
     lines = []
-    lines.append(f"🌅 *TOP 5 INDIAN STOCKS (< ₹500) GAIN PREDICTION* 🚀")
+    lines.append(f"🌅 *TOP {len(predictions)} INDIAN STOCKS (< ₹500) GAIN PREDICTION* 🚀")
     lines.append(f"📅 *Date:* {date_str} | *NSE Intraday Trading Strategy*")
     lines.append("───────────────────────────")
     
@@ -45,7 +45,7 @@ def generate_morning_report_markdown(date_str: str, predictions: List[Dict[str, 
         lines.append("🧠 *AI Engine:* Google Gemini + Technical Ensemble Fusion")
         lines.append("───────────────────────────")
 
-    lines.append("💼 *Investment Rules:* Assumed ₹25,000 on each stock (Total: ₹1,25,000)")
+    lines.append(f"💼 *Investment Rules:* Assumed ₹25,000 on each stock (Total: ₹{25000 * len(predictions):,})")
     lines.append(f"🎯 *Exit Strategy:* Pre-10:00 AM Sell on +₹10.00 | Post-10:00 AM Target +₹{PROFIT_TARGET_INR:.2f} (Trailing SL: +₹2 push on target, then +₹1 per +₹1 rise) / Stop Loss -₹{STOP_LOSS_INR:.2f}")
     lines.append("───────────────────────────")
     lines.append("")

@@ -33,7 +33,7 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
       * If stock does not reach target: Initial stop loss (-₹1, e.g. 399) triggers.
     """
     if not date_str:
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
 
     print(f"⏱️ Starting 1-Minute Intraday Stock Tracker for {date_str}...")
     predictions = get_predictions_by_date(date_str)
@@ -98,7 +98,7 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
         is_before_10am = now_ist.time() < datetime.time(10, 0)
         open_count = sum(1 for pos in active_positions.values() if pos['status'] == 'OPEN')
 
-        print(f"\n🔍 [{now_ist.strftime('%H:%M:%S IST')}] Polling 1-minute ticker prices ({open_count}/5 positions OPEN)...")
+        print(f"\n🔍 [{now_ist.strftime('%H:%M:%S IST')}] Polling 1-minute ticker prices ({open_count}/{len(active_positions)} positions OPEN)...")
 
         for ticker, pos in list(active_positions.items()):
             if pos['status'] != 'OPEN':
@@ -285,9 +285,16 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
                 if pos['status'] == 'OPEN':
                     pos['status'] = 'CLOSED'
                     close_p = pos.get('current_price') or pos['high_price']
+                    if pos.get('target_hit') and pos.get('stop_loss_price'):
+                        close_p = max(close_p, pos['stop_loss_price'])
                     pos['exit_price'] = close_p
                     pnl_share = round(close_p - pos['entry_price'], 2)
-                    pos['exit_reason'] = f'TARGET_MET_MARKET_CLOSE (+₹{pnl_share:g})' if pos.get('target_hit') else 'MARKET_CLOSE'
+                    if pos['exit_price'] == pos.get('stop_loss_price'):
+                        pos['exit_reason'] = f'TARGET_MET_TRAILING_STOP (+₹{pnl_share:g})'
+                    elif pos.get('target_hit'):
+                        pos['exit_reason'] = f'TARGET_MET_MARKET_CLOSE (+₹{pnl_share:g})'
+                    else:
+                        pos['exit_reason'] = 'GAIN_MARKET_CLOSE' if pnl_share >= 0 else 'MARKET_CLOSE'
                     pos['exit_time'] = '15:30'
 
                 entry_p = pos['entry_price']

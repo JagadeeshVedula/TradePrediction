@@ -32,6 +32,7 @@ from database import (
     save_outcomes,
     get_predictions_by_date,
     get_outcomes_by_date,
+    get_latest_predictions,
     log_retraining,
     get_all_matched_records,
     get_supabase_client
@@ -221,8 +222,8 @@ class TechStockPredictor:
         if not results:
             return []
 
-        # Sort by expected gain % descending and pick Top 12 candidates for deep AI evaluation
-        results.sort(key=lambda x: (x['expected_gain_pct'], x['confidence_score']), reverse=True)
+        # Sort by confidence score (highest accuracy) and expected gain % descending
+        results.sort(key=lambda x: (x['confidence_score'], x['expected_gain_pct']), reverse=True)
         top_candidates = results[:12]
 
         print("🌐 Fetching Global Market Cues (US & Singapore) and Financial News (Moneycontrol & Times of India)...")
@@ -233,23 +234,35 @@ class TechStockPredictor:
         for cand in top_candidates:
             cand['recent_news'] = fetch_stock_specific_news(cand['ticker'], max_items=2)
 
-        # Call Gemini AI to analyze global cues + news sentiment + technicals and select the Top 5
-        top_5 = analyze_and_rank_predictions_with_gemini(top_candidates, market_context)
+        # Call Gemini AI to analyze global cues + news sentiment + technicals and select the Top N picks
+        top_picks = analyze_and_rank_predictions_with_gemini(top_candidates, market_context)
 
-        for rank, item in enumerate(top_5, start=1):
+        for rank, item in enumerate(top_picks, start=1):
             item['rank'] = rank
 
-        return top_5
+        return top_picks
 
     def retrain_evening_feedback_loop(self, date_str: str, universe_tickers: List[str]) -> Dict[str, Any]:
         """Post-close market feedback loop: evaluate 1-minute intraday trades and retrain model."""
         predictions = get_predictions_by_date(date_str)
         if not predictions:
-            print(f"⚠️ No morning predictions recorded for date {date_str} to evaluate.")
-            return {'status': 'NO_PREDICTIONS', 'date': date_str}
+            latest = get_latest_predictions()
+            if latest:
+                predictions = latest
+                date_str = latest[0]['date']
+            else:
+                print(f"⚠️ No morning predictions recorded for date {date_str} to evaluate.")
+                return {'status': 'NO_PREDICTIONS', 'date': date_str}
+
+        # Check if outcomes were ALREADY recorded by the live intraday tracker today
+        existing_outcomes = get_outcomes_by_date(date_str)
+        valid_existing = {
+            o['ticker']: o for o in existing_outcomes
+            if o.get('exit_reason') and o.get('exit_reason') not in ['OPEN', 'MARKET_NOT_OPEN_YET', 'SESSION_PENDING']
+        }
 
         outcomes = []
-        print(f"📥 Evaluating 1-minute intraday price action (+₹{PROFIT_TARGET_INR:g} target with trailing SL / -₹{STOP_LOSS_INR:g} initial SL) for Top 5 predictions on {date_str}...")
+        print(f"📥 Evaluating intraday trade outcomes (+₹{PROFIT_TARGET_INR:g} target with trailing SL / -₹{STOP_LOSS_INR:g} initial SL) for Top {len(predictions)} predictions on {date_str}...")
         for p in predictions:
             ticker = p['ticker']
             entry_price = p['starting_price']
@@ -258,6 +271,20 @@ class TechStockPredictor:
                 quantity = max(1, int(INVESTMENT_PER_STOCK / entry_price))
             invested_amount = round(quantity * entry_price, 2)
 
+            # If live intraday tracker already recorded a closed trade for this stock, preserve it!
+            if ticker in valid_existing:
+                actual = dict(valid_existing[ticker])
+                actual['quantity'] = quantity
+                actual['invested_amount'] = invested_amount
+                exit_price = actual.get('exit_price', actual.get('close_price', entry_price))
+                pnl_per_share = actual.get('pnl_per_share', round(exit_price - entry_price, 2))
+                actual['pnl_per_share'] = pnl_per_share
+                actual['total_pnl'] = round(quantity * pnl_per_share, 2)
+                actual['pnl_pct'] = round((actual['total_pnl'] / invested_amount) * 100, 2) if invested_amount > 0 else 0.0
+                outcomes.append(actual)
+                continue
+
+            # Otherwise, evaluate intraday price action from 1-minute bars
             trade = evaluate_intraday_trade_1m(
                 ticker=ticker,
                 entry_price=entry_price,

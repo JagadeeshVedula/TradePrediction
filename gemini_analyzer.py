@@ -154,7 +154,7 @@ def analyze_and_rank_predictions_with_gemini(
 
     prompt = f"""
 You are an elite Wall Street & Dalal Street Quantitative Market Strategist and AI Trading Engine.
-Your task is to select the TOP 5 INDIAN STOCKS (< ₹500) with the HIGHEST CONFIDENCE for intraday trading today on the National Stock Exchange (NSE).
+Your task is to select the TOP {TOP_N_PREDICTIONS} INDIAN STOCKS (< ₹500) with the HIGHEST CONFIDENCE AND ACCURACY for intraday trading today on the National Stock Exchange (NSE).
 
 ### INTRADAY TRADING STRATEGY RULES:
 - Universe: All stocks must be priced under ₹500.
@@ -176,12 +176,12 @@ Overall Global Tone: {market_context.get("overall_tone", "NEUTRAL")}
 ### INSTRUCTIONS:
 1. Synthesize Global Cues: Evaluate how US market close (S&P 500, Nasdaq, Dow Jones) and Singapore Straits Times / Asian cues influence Indian sectors (e.g. Metals, Banking, Energy, PSU, Infra, Tech).
 2. Filter & Eliminate Risks: Drop candidates that face adverse news or high downside volatility that could hit the -₹{STOP_LOSS_INR:.2f} stop loss.
-3. Select the TOP 5 Highest-Confidence Winners: Pick the 5 stocks with the strongest catalyst alignment (Technical breakout + volume + macro/news tailwind) to achieve +₹{PROFIT_TARGET_INR:.2f} target (with upside trailing stop profit) or early +₹10.00 target.
-4. Assign an AI Confidence Score: Must be between 82.0% and 98.0% based on conviction.
+3. Select the TOP {TOP_N_PREDICTIONS} Highest-Confidence, Highest-Accuracy Winners: Pick the {TOP_N_PREDICTIONS} stocks with the strongest catalyst alignment (Technical breakout + volume + macro/news tailwind) to achieve +₹{PROFIT_TARGET_INR:.2f} target (with upside trailing stop profit) or early +₹10.00 target.
+4. Assign an AI Confidence Score: Must be between 85.0% and 98.5% based on conviction and winning probability.
 5. Provide a crisp, high-impact `signal_reasons` for each (15-20 words max highlighting catalyst, news link, and technical momentum).
 
 ### OUTPUT FORMAT:
-Return ONLY a valid JSON array of exactly 5 objects in this structure:
+Return ONLY a valid JSON array of exactly {TOP_N_PREDICTIONS} objects in this structure:
 [
   {{
     "rank": 1,
@@ -192,8 +192,7 @@ Return ONLY a valid JSON array of exactly 5 objects in this structure:
     "catalyst": "Global commodity rally & domestic PSU demand",
     "selection_basis": "Bullish technical setup with 1.4x volume surge, expanding MACD histogram, and strong support at entry. Chosen over other candidates due to high risk-reward ratio.",
     "news_impact": "Boosted by overnight surge in global metal indices and increased domestic infrastructure allocations reported in Economic Times."
-  }},
-  ...
+  }}
 ]
 """
 
@@ -265,10 +264,10 @@ def _fallback_quantitative_ranking(
     """Quantitative fallback ranking when Gemini API is unavailable."""
     overall_tone = market_context.get("overall_tone", "NEUTRAL")
     
-    # Sort candidates by combined expected gain and technical score
+    # Sort candidates prioritizing high confidence score (accuracy) and expected gain
     sorted_candidates = sorted(
         candidates,
-        key=lambda x: (x.get("expected_gain_pct", 0) * 1.5 + x.get("confidence_score", 50) * 0.1),
+        key=lambda x: (x.get("confidence_score", 50) * 1.5 + x.get("expected_gain_pct", 0) * 0.5),
         reverse=True
     )
     
@@ -346,7 +345,7 @@ def generate_gemini_analysis_markdown(
         lines.append("")
 
     lines.append("───────────────────────────")
-    lines.append("🎯 *TOP 5 PICKS — SELECTION BASES & NEWS IMPACT:*")
+    lines.append(f"🎯 *TOP {len(predictions)} PICKS — SELECTION BASES & NEWS IMPACT:*")
     lines.append("───────────────────────────")
 
     rank_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
@@ -385,7 +384,7 @@ def generate_gemini_analysis_markdown(
     lines.append("1. *Universe Filter:* Screened all liquid NSE stocks priced under ₹500.")
     lines.append("2. *Quantitative ML Model:* Screened technical indicators (RSI, MACD, 20-day Volume, ATR, Momentum).")
     lines.append("3. *Macro & News Ingestion:* Live US/Asian index cues and RSS news headlines fed into Gemini 2.5 Flash.")
-    lines.append("4. *AI Synthesis:* Gemini analyzed news tailwinds vs downside volatility risk to pick the Top 5.")
+    lines.append(f"4. *AI Synthesis:* Gemini analyzed news tailwinds vs downside volatility risk to pick the Top {len(predictions)} with highest conviction.")
     lines.append("5. *Intraday Trade Rules:* Assumed ₹25k allocation; Pre-10:00 AM target +₹10; Post-10:00 AM +₹2 target with +₹1 trailing stop.")
 
     return "\n".join(lines)
@@ -398,13 +397,23 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     """
     import datetime
     from zoneinfo import ZoneInfo
-    from database import get_predictions_by_date
+    from database import get_predictions_by_date, get_latest_predictions, save_predictions
     from market_news import get_market_context_summary
 
+    ist = ZoneInfo("Asia/Kolkata")
     if not date_str:
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        date_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
 
     predictions = get_predictions_by_date(date_str)
+    # If no predictions found for requested date, look up the latest predictions in database
+    # to avoid regenerating different stocks!
+    if not predictions:
+        latest = get_latest_predictions()
+        if latest:
+            predictions = latest
+            date_str = latest[0]['date']
+            print(f"📌 Using existing predictions recorded on {date_str} for Gemini Deep Analysis.")
+
     market_context = get_market_context_summary()
 
     # If predictions exist and have selection_basis
@@ -415,7 +424,7 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     api_key = get_gemini_api_key()
     if predictions and is_gemini_configured():
         prompt = f"""
-You are an expert Dalal Street stock strategist. Explain in detail the exact selection bases and news impact for these Top 5 Indian stocks (< ₹500) predicted for trading on {date_str}:
+You are an expert Dalal Street stock strategist. Explain in detail the exact selection bases and news impact for these Top {len(predictions)} Indian stocks (< ₹500) predicted for trading on {date_str}:
 
 STOCKS:
 {json.dumps([{ 'ticker': p['ticker'], 'starting_price': p['starting_price'], 'signal_reasons': p.get('signal_reasons', '') } for p in predictions], indent=2)}
@@ -446,17 +455,19 @@ Return ONLY valid JSON array.
                     p["news_impact"] = info.get("news_impact", "Supported by sectoral news flow.")
                     p["catalyst"] = info.get("catalyst", "")
 
+            # Persist enriched selection bases into database
+            save_predictions(date_str, predictions)
             return generate_gemini_analysis_markdown(date_str, predictions, market_context)
 
-    # Fallback: if no predictions recorded yet, run predictor to generate them
-    from ml_model import TechStockPredictor
-    from config import DEFAULT_TECH_TICKERS
-    predictor = TechStockPredictor()
-    top_5 = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
-    if top_5:
-        from database import save_predictions
-        save_predictions(date_str, top_5)
-        return generate_gemini_analysis_markdown(date_str, top_5, getattr(predictor, "last_market_context", market_context))
+    # Fallback: if no predictions recorded yet in database, run predictor to generate them
+    if not predictions:
+        from ml_model import TechStockPredictor
+        from config import DEFAULT_TECH_TICKERS
+        predictor = TechStockPredictor()
+        top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
+        if top_picks:
+            save_predictions(date_str, top_picks)
+            return generate_gemini_analysis_markdown(date_str, top_picks, getattr(predictor, "last_market_context", market_context))
 
     return "⚠️ Could not generate Gemini Deep Analysis. Please check market data connection or run /morning first."
 

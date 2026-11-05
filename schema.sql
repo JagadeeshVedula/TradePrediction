@@ -49,6 +49,21 @@ ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outcomes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_retraining_log ENABLE ROW LEVEL SECURITY;
 
+-- Migration / Column additions for existing Supabase installations:
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS quantity INT DEFAULT 0;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS invested_amount FLOAT DEFAULT 0.0;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS selection_basis TEXT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS news_impact TEXT;
+
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS quantity INT DEFAULT 0;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS invested_amount FLOAT DEFAULT 0.0;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS exit_price FLOAT DEFAULT 0.0;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS exit_reason TEXT;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS exit_time TEXT;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS pnl_per_share FLOAT DEFAULT 0.0;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS total_pnl FLOAT DEFAULT 0.0;
+ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS pnl_pct FLOAT DEFAULT 0.0;
+
 -- Allow authenticated/service role full access
 CREATE POLICY "Service Role Full Access on Predictions" ON predictions FOR ALL USING (true);
 CREATE POLICY "Service Role Full Access on Outcomes" ON outcomes FOR ALL USING (true);

@@ -87,4 +87,5 @@ DEFAULT_GAIN_TARGET_PCT = 2.0   # Minimum expected target gain % for model scori
 DEFAULT_STOP_LOSS_PCT = 1.5    # Fallback risk stop loss %
 LOOKBACK_DAYS = 60             # Days of historical market data for indicator computation
 TOP_N_PREDICTIONS = 2          # Number of top stocks to recommend daily (Top 2 highest accuracy)
+MIN_AI_CONFIDENCE_THRESHOLD = 95.0  # Minimum AI confidence required (>95%) to recommend trades
 

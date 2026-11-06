@@ -18,7 +18,7 @@ from sklearn.metrics import mean_absolute_error
 from config import (
     MODEL_PATH, SCALER_PATH, DEFAULT_GAIN_TARGET_PCT, DEFAULT_STOP_LOSS_PCT,
     TOP_N_PREDICTIONS, SUPABASE_BUCKET, MAX_STOCK_PRICE, INVESTMENT_PER_STOCK,
-    PROFIT_TARGET_INR, STOP_LOSS_INR
+    PROFIT_TARGET_INR, STOP_LOSS_INR, MIN_AI_CONFIDENCE_THRESHOLD
 )
 from data_fetcher import (
     FEATURE_COLUMNS,
@@ -237,10 +237,16 @@ class TechStockPredictor:
         # Call Gemini AI to analyze global cues + news sentiment + technicals and select the Top N picks
         top_picks = analyze_and_rank_predictions_with_gemini(top_candidates, market_context)
 
-        for rank, item in enumerate(top_picks, start=1):
+        # Enforce that only stocks with confidence > MIN_AI_CONFIDENCE_THRESHOLD (95%) are qualified
+        qualifying = [p for p in top_picks if p.get('confidence_score', 0.0) > MIN_AI_CONFIDENCE_THRESHOLD]
+        if len(qualifying) < TOP_N_PREDICTIONS:
+            print(f"⚠️ [AI Engine]: Only {len(qualifying)}/{TOP_N_PREDICTIONS} stocks met >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold.")
+            return []
+
+        for rank, item in enumerate(qualifying[:TOP_N_PREDICTIONS], start=1):
             item['rank'] = rank
 
-        return top_picks
+        return qualifying[:TOP_N_PREDICTIONS]
 
     def retrain_evening_feedback_loop(self, date_str: str, universe_tickers: List[str]) -> Dict[str, Any]:
         """Post-close market feedback loop: evaluate 1-minute intraday trades and retrain model."""

@@ -9,7 +9,7 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-from config import DEFAULT_TECH_TICKERS, TOP_N_PREDICTIONS
+from config import DEFAULT_TECH_TICKERS, TOP_N_PREDICTIONS, MIN_AI_CONFIDENCE_THRESHOLD
 from database import init_db, save_predictions, save_outcomes
 
 from ml_model import TechStockPredictor
@@ -53,9 +53,19 @@ def run_morning_mode(date_str: str, send_telegram: bool = False, target_chat_id:
     predictor = TechStockPredictor()
     
     top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
-    if not top_picks:
-        print("❌ Could not generate predictions. Check internet connection or stock tickers.")
-        return
+    if not top_picks or len(top_picks) < TOP_N_PREDICTIONS:
+        msg = (
+            f"⚠️ *AI Trading Alert ({date_str}):*\n"
+            f"🛡️ *AI is not confident for todays market.*\n"
+            f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading.\n"
+            f"💰 Capital is 100% preserved. No trades recommended today."
+        )
+        print("\n" + msg + "\n")
+        save_predictions(date_str, [])
+        if send_telegram:
+            print("📤 Sending Alert to Telegram Channel...")
+            send_telegram_message(msg, target_chat_id=target_chat_id)
+        return msg
 
     # Save to database
     save_predictions(date_str, top_picks)
@@ -107,7 +117,10 @@ def run_full_cycle_mode(date_str: str, send_telegram: bool = True, target_chat_i
     
     # Phase 1: Morning Prediction
     print("🌅 Phase 1: Generating Morning Predictions (< ₹500 stocks)...")
-    run_morning_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
+    morning_res = run_morning_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
+    if morning_res and "AI is not confident" in str(morning_res):
+        print(f"🛑 Halting full cycle for {date_str}: AI is not confident for today's market. Capital preserved.")
+        return morning_res
 
     # Phase 2: Intraday 1-Minute Monitoring
     now_ist = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))

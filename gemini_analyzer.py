@@ -9,7 +9,8 @@ from config import (
     INVESTMENT_PER_STOCK,
     PROFIT_TARGET_INR,
     STOP_LOSS_INR,
-    TOP_N_PREDICTIONS
+    TOP_N_PREDICTIONS,
+    MIN_AI_CONFIDENCE_THRESHOLD
 )
 
 # Optional google-genai SDK import
@@ -177,7 +178,10 @@ Overall Global Tone: {market_context.get("overall_tone", "NEUTRAL")}
 1. Synthesize Global Cues: Evaluate how US market close (S&P 500, Nasdaq, Dow Jones) and Singapore Straits Times / Asian cues influence Indian sectors (e.g. Metals, Banking, Energy, PSU, Infra, Tech).
 2. Filter & Eliminate Risks: Drop candidates that face adverse news or high downside volatility that could hit the -₹{STOP_LOSS_INR:.2f} stop loss.
 3. Select the TOP {TOP_N_PREDICTIONS} Highest-Confidence, Highest-Accuracy Winners: Pick the {TOP_N_PREDICTIONS} stocks with the strongest catalyst alignment (Technical breakout + volume + macro/news tailwind) to achieve +₹{PROFIT_TARGET_INR:.2f} target (with upside trailing stop profit) or early +₹10.00 target.
-4. Assign an AI Confidence Score: Must be between 85.0% and 98.5% based on conviction and winning probability.
+4. Assign an Objective AI Confidence Score (0.0% to 100.0%):
+   - You MUST only assign a score > 95.0% (e.g. 95.5% - 98.5%) if you have exceptionally high conviction with strong volume, momentum, favorable news catalysts, and macro support.
+   - If market conditions are uncertain, volatile, or stocks lack clear breakout catalysts, assign a realistic confidence score below 95.0% (e.g. 70.0% - 94.0%).
+   - Do NOT artificially inflate confidence scores above 95.0% if the risk setup does not justify it.
 5. Provide a crisp, high-impact `signal_reasons` for each (15-20 words max highlighting catalyst, news link, and technical momentum).
 
 ### OUTPUT FORMAT:
@@ -241,7 +245,7 @@ Return ONLY a valid JSON array of exactly {TOP_N_PREDICTIONS} objects in this st
                 "expected_gain_pct": round(exp_gain, 2),
                 "target_price": round(start_p + PROFIT_TARGET_INR, 2),
                 "stop_loss": round(start_p - STOP_LOSS_INR, 2),
-                "confidence_score": round(min(98.5, max(75.0, conf)), 1),
+                "confidence_score": round(conf, 1),
                 "quantity": qty,
                 "invested_amount": inv_amt,
                 "signal_reasons": reasons,
@@ -251,8 +255,12 @@ Return ONLY a valid JSON array of exactly {TOP_N_PREDICTIONS} objects in this st
                 "gemini_selected": True
             })
 
-        if len(final_picks) >= TOP_N_PREDICTIONS:
-            return final_picks
+        qualifying_picks = [p for p in final_picks if p.get("confidence_score", 0.0) > MIN_AI_CONFIDENCE_THRESHOLD]
+        if len(qualifying_picks) >= TOP_N_PREDICTIONS:
+            return qualifying_picks[:TOP_N_PREDICTIONS]
+        else:
+            print(f"⚠️ [Gemini AI]: Only {len(qualifying_picks)}/{TOP_N_PREDICTIONS} stocks met >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold.")
+            return qualifying_picks
 
     print("⚠️ [Gemini AI]: Could not parse complete selection from Gemini output. Falling back to quantitative ranking.")
     return _fallback_quantitative_ranking(candidates, market_context)
@@ -283,7 +291,8 @@ def _fallback_quantitative_ranking(
         item_copy["signal_reasons"] = reasons
         top_picks.append(item_copy)
 
-    return top_picks
+    qualifying = [p for p in top_picks if p.get("confidence_score", 0.0) > MIN_AI_CONFIDENCE_THRESHOLD]
+    return qualifying[:TOP_N_PREDICTIONS] if len(qualifying) >= TOP_N_PREDICTIONS else qualifying
 
 def generate_macro_briefing_markdown(market_context: Dict[str, Any]) -> str:
     """Generate clean macro briefing summary for reports and Telegram."""
@@ -401,18 +410,42 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     from market_news import get_market_context_summary
 
     ist = ZoneInfo("Asia/Kolkata")
+    explicit_date = bool(date_str)
     if not date_str:
         date_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
 
     predictions = get_predictions_by_date(date_str)
-    # If no predictions found for requested date, look up the latest predictions in database
-    # to avoid regenerating different stocks!
-    if not predictions:
+    # If no predictions found for default date, check if today's latest predictions exist
+    if not predictions and not explicit_date:
         latest = get_latest_predictions()
-        if latest:
+        if latest and latest[0].get('date') == date_str:
             predictions = latest
-            date_str = latest[0]['date']
             print(f"📌 Using existing predictions recorded on {date_str} for Gemini Deep Analysis.")
+
+    # If predictions exist for date, check if they meet confidence threshold
+    if predictions and len(predictions) < TOP_N_PREDICTIONS:
+        return (
+            f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
+            f"🛡️ *AI is not confident for todays market.*\n"
+            f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
+            f"Capital is 100% preserved and no trades are recommended."
+        )
+
+    # Fallback: if no predictions recorded yet in database, run predictor to generate them
+    if not predictions:
+        from ml_model import TechStockPredictor
+        from config import DEFAULT_TECH_TICKERS
+        predictor = TechStockPredictor()
+        top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
+        if not top_picks or len(top_picks) < TOP_N_PREDICTIONS:
+            return (
+                f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
+                f"🛡️ *AI is not confident for todays market.*\n"
+                f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
+                f"Capital is 100% preserved and no trades are recommended."
+            )
+        predictions = top_picks
+        save_predictions(date_str, top_picks)
 
     market_context = get_market_context_summary()
 
@@ -459,15 +492,5 @@ Return ONLY valid JSON array.
             save_predictions(date_str, predictions)
             return generate_gemini_analysis_markdown(date_str, predictions, market_context)
 
-    # Fallback: if no predictions recorded yet in database, run predictor to generate them
-    if not predictions:
-        from ml_model import TechStockPredictor
-        from config import DEFAULT_TECH_TICKERS
-        predictor = TechStockPredictor()
-        top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
-        if top_picks:
-            save_predictions(date_str, top_picks)
-            return generate_gemini_analysis_markdown(date_str, top_picks, getattr(predictor, "last_market_context", market_context))
-
-    return "⚠️ Could not generate Gemini Deep Analysis. Please check market data connection or run /morning first."
+    return generate_gemini_analysis_markdown(date_str, predictions, getattr(predictor, "last_market_context", market_context))
 

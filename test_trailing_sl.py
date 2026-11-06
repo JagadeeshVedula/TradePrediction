@@ -10,18 +10,20 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 
 from config import (
     TOP_N_PREDICTIONS, PROFIT_TARGET_INR, STOP_LOSS_INR,
-    TRAILING_SL_PUSH_INR, TRAILING_SL_STEP_INR
+    TRAILING_SL_PUSH_INR, TRAILING_SL_STEP_INR, MIN_AI_CONFIDENCE_THRESHOLD
 )
-from data_fetcher import evaluate_intraday_trade_1m
+from data_fetcher import evaluate_intraday_trade_1m, FEATURE_COLUMNS
 from reporter import generate_morning_report_markdown, generate_evening_report_markdown
 from database import save_predictions, get_predictions_by_date, save_outcomes, get_outcomes_by_date
 from ml_model import TechStockPredictor
+from main import run_morning_mode
 
 class TestTrailingStopLossAndPipeline(unittest.TestCase):
 
-    def test_top_n_is_2(self):
-        """Verify Top 5 was reduced to Top 2."""
+    def test_top_n_is_2_and_threshold_95(self):
+        """Verify Top 2 picks and >95% confidence threshold configuration."""
         self.assertEqual(TOP_N_PREDICTIONS, 2)
+        self.assertEqual(MIN_AI_CONFIDENCE_THRESHOLD, 95.0)
 
     def test_trailing_stop_loss_profit_locked(self):
         """
@@ -32,10 +34,6 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         target_date_str = "2026-11-04"
         ist = ZoneInfo("Asia/Kolkata")
 
-        # Create mock 1m bars
-        # 10:05 AM: Reaches 402.5 (+2.5) -> target hit, SL pushed to 401 (+1)
-        # 10:15 AM: Reaches 404.0 (+4.0) -> steps=2, SL trailed to 403 (+3)
-        # 10:30 AM: Drops to 402.8 -> low=402.5 <= 403 -> Triggers trailing stop loss @ 403
         timestamps = [
             datetime.datetime(2026, 11, 4, 10, 5, tzinfo=ist),
             datetime.datetime(2026, 11, 4, 10, 15, tzinfo=ist),
@@ -70,9 +68,6 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         target_date_str = "2026-11-04"
         ist = ZoneInfo("Asia/Kolkata")
 
-        # 09:30 AM: Stock reaches 403.0 (+3) -> target hit
-        # 10:05 AM: Stock pulls back to 399.5 -> in old code, it triggered initial SL (-1).
-        # In fixed code, target_hit is True, trailing SL is at least 401 (+1)
         timestamps = [
             datetime.datetime(2026, 11, 4, 9, 30, tzinfo=ist),
             datetime.datetime(2026, 11, 4, 10, 5, tzinfo=ist),
@@ -105,8 +100,6 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         target_date_str = "2026-11-04"
         ist = ZoneInfo("Asia/Kolkata")
 
-        # Reached 402.5 at 10:15 (SL = 401)
-        # At close 15:29: close is 402.0 (above SL 401)
         timestamps = [
             datetime.datetime(2026, 11, 4, 10, 15, tzinfo=ist),
             datetime.datetime(2026, 11, 4, 15, 29, tzinfo=ist),
@@ -143,7 +136,7 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
                 'expected_gain_pct': 2.5,
                 'target_price': 152.0,
                 'stop_loss': 149.0,
-                'confidence_score': 95.0,
+                'confidence_score': 96.0,
                 'quantity': 166,
                 'invested_amount': 24900.0
             },
@@ -155,12 +148,11 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
                 'expected_gain_pct': 2.2,
                 'target_price': 282.0,
                 'stop_loss': 279.0,
-                'confidence_score': 92.0,
+                'confidence_score': 95.5,
                 'quantity': 89,
                 'invested_amount': 24920.0
             }
         ]
-        # Live tracker recorded profit with trailing stop
         live_outcomes = [
             {
                 'date': date_str,
@@ -210,7 +202,6 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
             with patch('ml_model.fetch_historical_training_dataset', return_value=(pd.DataFrame(), pd.Series())):
                 summary = predictor.retrain_evening_feedback_loop(date_str, ['TATASTEEL.NS', 'BEL.NS'])
 
-        # Both stocks should preserve their positive profit
         outcomes = summary['outcomes']
         self.assertEqual(len(outcomes), 2)
         for o in outcomes:
@@ -234,7 +225,7 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
                 'expected_gain_pct': 2.5,
                 'target_price': 152.0,
                 'stop_loss': 149.0,
-                'confidence_score': 95.0,
+                'confidence_score': 96.5,
                 'selection_basis': 'Bullish breakout above 20 EMA with strong delivery volume.',
                 'news_impact': 'Metal sector surge driven by infrastructure demand.',
                 'quantity': 166,
@@ -248,7 +239,7 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
                 'expected_gain_pct': 2.2,
                 'target_price': 282.0,
                 'stop_loss': 279.0,
-                'confidence_score': 92.0,
+                'confidence_score': 95.8,
                 'selection_basis': 'Defence PSU order backlog expansion and RSI momentum.',
                 'news_impact': 'New defense contract announcement.',
                 'quantity': 89,
@@ -268,6 +259,65 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         self.assertIn("TATASTEEL.NS", report)
         self.assertIn("BEL.NS", report)
         self.assertIn("TOP 2 PICKS", report)
+
+    def test_ai_not_confident_when_below_95_threshold(self):
+        """
+        Verify that if fewer than 2 stocks achieve >95% confidence,
+        the system responds with 'AI is not confident for todays market'.
+        """
+        predictor = TechStockPredictor()
+        dummy_features = {col: 1.0 for col in FEATURE_COLUMNS}
+        sub_95_picks = [
+            {'ticker': 'WIPRO.NS', 'starting_price': 420.0, 'expected_gain_pct': 2.0, 'confidence_score': 94.0},
+            {'ticker': 'NTPC.NS', 'starting_price': 350.0, 'expected_gain_pct': 1.8, 'confidence_score': 92.5}
+        ]
+        with patch('ml_model.analyze_and_rank_predictions_with_gemini', return_value=sub_95_picks):
+            with patch('ml_model.get_market_context_summary', return_value={'overall_tone': 'NEUTRAL'}):
+                with patch('ml_model.fetch_stock_specific_news', return_value=[]):
+                    with patch('ml_model.fetch_latest_ticker_features', return_value={'starting_price': 400.0, 'features': dummy_features}):
+                        with patch.object(predictor, 'model_rf', MagicMock(predict=MagicMock(return_value=[2.0]))):
+                            with patch.object(predictor, 'model_gb', MagicMock(predict=MagicMock(return_value=[2.0]))):
+                                with patch.object(predictor, 'scaler', MagicMock(transform=MagicMock(return_value=[[1]*len(FEATURE_COLUMNS)]))):
+                                    picks = predictor.predict_top_5_gainers(['WIPRO.NS', 'NTPC.NS'])
+
+        self.assertEqual(picks, [])
+
+        # Verify run_morning_mode outputs the exact alert
+        with patch.object(TechStockPredictor, 'predict_top_5_gainers', return_value=[]):
+            res = run_morning_mode(date_str="2026-11-06", send_telegram=False)
+            self.assertIn("AI is not confident for todays market", res)
+
+        # Verify run_gemini_deep_analysis outputs the exact alert
+        from gemini_analyzer import run_gemini_deep_analysis
+        save_predictions("2026-11-06", [])
+        with patch('market_news.get_market_context_summary', return_value={'overall_tone': 'NEUTRAL'}):
+            with patch.object(TechStockPredictor, 'predict_top_5_gainers', return_value=[]):
+                res_analysis = run_gemini_deep_analysis("2026-11-06")
+                self.assertIn("AI is not confident for todays market", res_analysis)
+
+    def test_ai_confident_when_stocks_above_95_threshold(self):
+        """
+        Verify that stocks with >95% confidence are successfully accepted and ranked.
+        """
+        dummy_features = {col: 1.0 for col in FEATURE_COLUMNS}
+        high_conf_picks = [
+            {'ticker': 'TATASTEEL.NS', 'starting_price': 150.0, 'expected_gain_pct': 2.5, 'confidence_score': 96.5},
+            {'ticker': 'BEL.NS', 'starting_price': 280.0, 'expected_gain_pct': 2.2, 'confidence_score': 95.8}
+        ]
+        predictor = TechStockPredictor()
+        with patch('ml_model.analyze_and_rank_predictions_with_gemini', return_value=high_conf_picks):
+            with patch('ml_model.get_market_context_summary', return_value={'overall_tone': 'BULLISH'}):
+                with patch('ml_model.fetch_stock_specific_news', return_value=[]):
+                    with patch('ml_model.fetch_latest_ticker_features', return_value={'starting_price': 150.0, 'features': dummy_features}):
+                        with patch.object(predictor, 'model_rf', MagicMock(predict=MagicMock(return_value=[2.0]))):
+                            with patch.object(predictor, 'model_gb', MagicMock(predict=MagicMock(return_value=[2.0]))):
+                                with patch.object(predictor, 'scaler', MagicMock(transform=MagicMock(return_value=[[1]*len(FEATURE_COLUMNS)]))):
+                                    picks = predictor.predict_top_5_gainers(['TATASTEEL.NS', 'BEL.NS'])
+
+        self.assertEqual(len(picks), 2)
+        self.assertEqual(picks[0]['ticker'], 'TATASTEEL.NS')
+        self.assertGreater(picks[0]['confidence_score'], 95.0)
+        self.assertGreater(picks[1]['confidence_score'], 95.0)
 
 if __name__ == '__main__':
     unittest.main()

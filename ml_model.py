@@ -33,6 +33,7 @@ from database import (
     get_predictions_by_date,
     get_outcomes_by_date,
     get_latest_predictions,
+    get_daily_session_status,
     log_retraining,
     get_all_matched_records,
     get_supabase_client
@@ -250,15 +251,19 @@ class TechStockPredictor:
 
     def retrain_evening_feedback_loop(self, date_str: str, universe_tickers: List[str]) -> Dict[str, Any]:
         """Post-close market feedback loop: evaluate 1-minute intraday trades and retrain model."""
+        session_status = get_daily_session_status(date_str)
+        if session_status and session_status.get('status') == 'AI_UNCONFIDENT':
+            print(f"🛡️ Daily Session Status for {date_str}: AI was not confident for trading (>95% threshold not met). Capital was 100% preserved.")
+            return {
+                'status': 'AI_UNCONFIDENT',
+                'date': date_str,
+                'message': f"AI was not confident for trading on {date_str} (>95% confidence threshold not met). Capital was 100% preserved. No trades executed."
+            }
+
         predictions = get_predictions_by_date(date_str)
         if not predictions:
-            latest = get_latest_predictions()
-            if latest:
-                predictions = latest
-                date_str = latest[0]['date']
-            else:
-                print(f"⚠️ No morning predictions recorded for date {date_str} to evaluate.")
-                return {'status': 'NO_PREDICTIONS', 'date': date_str}
+            print(f"⚠️ No morning predictions recorded for date {date_str} to evaluate.")
+            return {'status': 'NO_PREDICTIONS', 'date': date_str}
 
         # Check if outcomes were ALREADY recorded by the live intraday tracker today
         existing_outcomes = get_outcomes_by_date(date_str)
@@ -277,27 +282,33 @@ class TechStockPredictor:
                 quantity = max(1, int(INVESTMENT_PER_STOCK / entry_price))
             invested_amount = round(quantity * entry_price, 2)
 
-            # If live intraday tracker already recorded a closed trade for this stock, preserve it!
-            if ticker in valid_existing:
-                actual = dict(valid_existing[ticker])
-                actual['quantity'] = quantity
-                actual['invested_amount'] = invested_amount
-                exit_price = actual.get('exit_price', actual.get('close_price', entry_price))
-                pnl_per_share = actual.get('pnl_per_share', round(exit_price - entry_price, 2))
-                actual['pnl_per_share'] = pnl_per_share
-                actual['total_pnl'] = round(quantity * pnl_per_share, 2)
-                actual['pnl_pct'] = round((actual['total_pnl'] / invested_amount) * 100, 2) if invested_amount > 0 else 0.0
-                outcomes.append(actual)
-                continue
-
-            # Otherwise, evaluate intraday price action from 1-minute bars
-            trade = evaluate_intraday_trade_1m(
+            existing_trade = valid_existing.get(ticker)
+            # Replay 1m bars to verify true price action & trailing stop loss triggers
+            sim_trade = evaluate_intraday_trade_1m(
                 ticker=ticker,
                 entry_price=entry_price,
                 target_date_str=date_str,
                 target_rupees=PROFIT_TARGET_INR,
                 stop_loss_rupees=STOP_LOSS_INR
             )
+
+            # Determine final exit: prioritize verified trailing profit over an erroneous MARKET_CLOSE loss
+            if existing_trade:
+                ex_reason = existing_trade.get('exit_reason', '')
+                ex_pnl = float(existing_trade.get('pnl_per_share', 0.0))
+                sim_reason = sim_trade.get('exit_reason', '')
+                sim_pnl = float(sim_trade.get('pnl_per_share', 0.0))
+
+                if 'TARGET' in ex_reason:
+                    # Live tracker already executed an intentional target/trailing exit; respect live execution
+                    trade = existing_trade
+                elif 'TARGET' in sim_reason and sim_pnl > ex_pnl:
+                    # Existing trade was erroneously recorded at MARKET_CLOSE; rescue with verified target trailing SL
+                    trade = sim_trade
+                else:
+                    trade = existing_trade
+            else:
+                trade = sim_trade
 
             exit_price = trade['exit_price']
             pnl_per_share = trade['pnl_per_share']
@@ -309,19 +320,19 @@ class TechStockPredictor:
             actual = {
                 'ticker': ticker,
                 'starting_price': entry_price,
-                'close_price': trade['close_price'],
-                'high_price': trade['high_price'],
-                'low_price': trade['low_price'],
+                'close_price': trade.get('close_price', exit_price),
+                'high_price': trade.get('high_price', entry_price),
+                'low_price': trade.get('low_price', entry_price),
                 'exit_price': exit_price,
                 'exit_reason': trade['exit_reason'],
-                'exit_time': trade['exit_time'],
+                'exit_time': trade.get('exit_time', '15:30'),
                 'quantity': quantity,
                 'invested_amount': invested_amount,
                 'pnl_per_share': pnl_per_share,
                 'total_pnl': total_pnl,
                 'pnl_pct': pnl_pct,
                 'actual_gain_pct': pnl_pct,
-                'max_gain_pct': round(((trade['high_price'] - entry_price) / entry_price) * 100, 2),
+                'max_gain_pct': round(((trade.get('high_price', entry_price) - entry_price) / entry_price) * 100, 2) if entry_price > 0 else 0.0,
                 'status': status
             }
 

@@ -44,10 +44,19 @@ CREATE TABLE IF NOT EXISTS model_retraining_log (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 4. Daily Session State Table (Track active or AI unconfident session)
+CREATE TABLE IF NOT EXISTS daily_sessions (
+    date TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Enable Row Level Security (RLS) or public service policy if needed
 ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outcomes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_retraining_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Migration / Column additions for existing Supabase installations:
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS quantity INT DEFAULT 0;
@@ -64,7 +73,16 @@ ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS pnl_per_share FLOAT DEFAULT 0.0;
 ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS total_pnl FLOAT DEFAULT 0.0;
 ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS pnl_pct FLOAT DEFAULT 0.0;
 
--- Allow authenticated/service role full access
-CREATE POLICY "Service Role Full Access on Predictions" ON predictions FOR ALL USING (true);
-CREATE POLICY "Service Role Full Access on Outcomes" ON outcomes FOR ALL USING (true);
-CREATE POLICY "Service Role Full Access on Retraining Log" ON model_retraining_log FOR ALL USING (true);
+-- Drop prior restrictive policies if existing and allow full CRUD access
+DROP POLICY IF EXISTS "Service Role Full Access on Predictions" ON predictions;
+DROP POLICY IF EXISTS "Service Role Full Access on Outcomes" ON outcomes;
+DROP POLICY IF EXISTS "Service Role Full Access on Retraining Log" ON model_retraining_log;
+DROP POLICY IF EXISTS "Allow All Access on Predictions" ON predictions;
+DROP POLICY IF EXISTS "Allow All Access on Outcomes" ON outcomes;
+DROP POLICY IF EXISTS "Allow All Access on Retraining Log" ON model_retraining_log;
+DROP POLICY IF EXISTS "Allow All Access on Daily Sessions" ON daily_sessions;
+
+CREATE POLICY "Allow All Access on Predictions" ON predictions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Access on Outcomes" ON outcomes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Access on Retraining Log" ON model_retraining_log FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Access on Daily Sessions" ON daily_sessions FOR ALL USING (true) WITH CHECK (true);

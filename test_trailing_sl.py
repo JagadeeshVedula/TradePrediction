@@ -16,7 +16,7 @@ from data_fetcher import evaluate_intraday_trade_1m, FEATURE_COLUMNS
 from reporter import generate_morning_report_markdown, generate_evening_report_markdown
 from database import save_predictions, get_predictions_by_date, save_outcomes, get_outcomes_by_date
 from ml_model import TechStockPredictor
-from main import run_morning_mode
+from main import run_morning_mode, run_evening_mode
 
 class TestTrailingStopLossAndPipeline(unittest.TestCase):
 
@@ -318,6 +318,106 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         self.assertEqual(picks[0]['ticker'], 'TATASTEEL.NS')
         self.assertGreater(picks[0]['confidence_score'], 95.0)
         self.assertGreater(picks[1]['confidence_score'], 95.0)
+
+    def test_evening_mode_no_predictions_does_not_mutate_or_rerun_morning(self):
+        """
+        Verify that when evening mode runs for a date with no morning predictions,
+        it cleanly reports that no morning predictions were found,
+        and NEVER mutates date_str to an older date or executes morning prediction.
+        """
+        date_str = "2026-12-31"  # Future date with no predictions
+        with patch('main.run_morning_mode') as mock_morning:
+            msg = run_evening_mode(date_str, send_telegram=False)
+            mock_morning.assert_not_called()
+            self.assertIn("No morning predictions were recorded for 2026-12-31", msg)
+
+    def test_evening_mode_ai_unconfident_preserves_capital(self):
+        """
+        Verify that if morning mode recorded AI_UNCONFIDENT for a date,
+        evening mode reports 100% capital preserved without generating new trades.
+        """
+        from database import set_daily_session_status
+        date_str = "2026-11-09"
+        set_daily_session_status(date_str, "AI_UNCONFIDENT", "Confidence threshold not met")
+
+        with patch('main.run_morning_mode') as mock_morning:
+            msg = run_evening_mode(date_str, send_telegram=False)
+            mock_morning.assert_not_called()
+            self.assertIn("AI was not confident for today's market", msg)
+            self.assertIn("Capital is 100% preserved", msg)
+
+    def test_evening_mode_locks_trailed_profit_over_erroneous_market_close_loss(self):
+        """
+        Verify that if a tracker had recorded MARKET_CLOSE with a loss,
+        but 1-minute replay demonstrates the stock achieved target (+Rs 2) and trailed stop loss,
+        the evening report locks in the positive profit and does NOT report a loss.
+        """
+        date_str = "2026-11-04"
+        mock_predictions = [
+            {
+                'date': date_str,
+                'ticker': 'TATASTEEL.NS',
+                'rank': 1,
+                'starting_price': 150.0,
+                'expected_gain_pct': 2.5,
+                'target_price': 152.0,
+                'stop_loss': 149.0,
+                'confidence_score': 96.0,
+                'quantity': 166,
+                'invested_amount': 24900.0
+            }
+        ]
+        save_predictions(date_str, mock_predictions)
+
+        # Erroneous outcome from an interrupted tracker that only saw market close price
+        bad_outcomes = [
+            {
+                'date': date_str,
+                'ticker': 'TATASTEEL.NS',
+                'starting_price': 150.0,
+                'close_price': 148.0,
+                'high_price': 150.0,
+                'low_price': 148.0,
+                'actual_gain_pct': -1.33,
+                'max_gain_pct': 0.0,
+                'status': 'MARKET_CLOSE',
+                'quantity': 166,
+                'invested_amount': 24900.0,
+                'exit_price': 148.0,
+                'exit_reason': 'MARKET_CLOSE',
+                'exit_time': '15:30',
+                'pnl_per_share': -2.0,
+                'total_pnl': -332.0,
+                'pnl_pct': -1.33
+            }
+        ]
+        save_outcomes(date_str, bad_outcomes)
+
+        # But 1m bar simulation proves the stock reached 153.50 (target +Rs 2 exceeded)
+        # and trailed stop loss locked profit at 152.00 (+Rs 2.00)
+        sim_trade_result = {
+            'ticker': 'TATASTEEL.NS',
+            'entry_price': 150.0,
+            'exit_price': 152.0,
+            'high_price': 153.5,
+            'low_price': 149.8,
+            'close_price': 148.0,
+            'exit_reason': 'TARGET_MET_TRAILING_STOP (+₹2)',
+            'exit_time': '11:15',
+            'pnl_per_share': 2.0
+        }
+
+        predictor = TechStockPredictor()
+        with patch.object(predictor, 'save_model'):
+            with patch('ml_model.fetch_historical_training_dataset', return_value=(pd.DataFrame(), pd.Series())):
+                with patch('ml_model.evaluate_intraday_trade_1m', return_value=sim_trade_result):
+                    summary = predictor.retrain_evening_feedback_loop(date_str, ['TATASTEEL.NS'])
+
+        outcomes = summary['outcomes']
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0]['exit_price'], 152.0)
+        self.assertGreater(outcomes[0]['pnl_per_share'], 0)
+        self.assertIn("TARGET_MET_TRAILING_STOP", outcomes[0]['exit_reason'])
 
 if __name__ == '__main__':
     unittest.main()

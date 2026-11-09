@@ -1,7 +1,7 @@
 import sqlite3
 import datetime
 from typing import List, Dict, Any, Optional
-from config import DB_PATH, SUPABASE_URL, SUPABASE_KEY, TOP_N_PREDICTIONS
+from config import DB_PATH, SUPABASE_URL, SUPABASE_KEY, TOP_N_PREDICTIONS, MIN_AI_CONFIDENCE_THRESHOLD
 
 # Optional Supabase import for cloud hosting
 try:
@@ -121,11 +121,71 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS daily_sessions (
+                date TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
         conn.commit()
 
+def set_daily_session_status(date_str: str, status: str, notes: str = "") -> None:
+    """Record daily trading session state (e.g. AI_UNCONFIDENT, TRADING_ACTIVE, COMPLETED)."""
+    sb = get_supabase_client()
+    if sb:
+        try:
+            sb.table("daily_sessions").upsert({
+                'date': date_str,
+                'status': status,
+                'notes': notes
+            }).execute()
+            print(f"☁️ Recorded session status '{status}' to Supabase for date {date_str}.")
+            return
+        except Exception as e:
+            print(f"Notice: Supabase daily_sessions upsert failed ({e}). Falling back to SQLite.")
+
+    init_db()
+    with get_sqlite_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO daily_sessions (date, status, notes)
+            VALUES (?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET status = excluded.status, notes = excluded.notes
+        ''', (date_str, status, notes))
+        conn.commit()
+
+def get_daily_session_status(date_str: str) -> Optional[Dict[str, Any]]:
+    """Retrieve daily trading session status for a given date."""
+    sb = get_supabase_client()
+    if sb:
+        try:
+            res = sb.table("daily_sessions").select("*").eq("date", date_str).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]
+        except Exception as e:
+            print(f"Notice: Supabase daily_sessions query failed ({e}). Falling back to SQLite.")
+
+    init_db()
+    with get_sqlite_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM daily_sessions WHERE date = ?", (date_str,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    return None
+
 def save_predictions(date_str: str, predictions: List[Dict[str, Any]]) -> None:
     """Save top predicted tech stocks into Supabase or SQLite."""
+    if not predictions:
+        set_daily_session_status(date_str, "AI_UNCONFIDENT", f"Confidence threshold >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% not met for 2 stocks")
+    else:
+        set_daily_session_status(date_str, "TRADING_ACTIVE", f"{len(predictions)} stocks selected")
+
     sb = get_supabase_client()
     if sb:
         try:

@@ -90,10 +90,30 @@ def run_evening_mode(date_str: str, send_telegram: bool = True, target_chat_id: 
     predictor = TechStockPredictor()
 
     summary = predictor.retrain_evening_feedback_loop(date_str, DEFAULT_TECH_TICKERS)
+    if summary.get('status') == 'AI_UNCONFIDENT':
+        msg = (
+            f"🌆 *Evening Market Summary ({date_str}):*\n"
+            f"🛡️ *AI was not confident for today's market.*\n"
+            f"No trades were placed today as no 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold.\n"
+            f"💰 Capital is 100% preserved. Ready for the next trading session! 🚀"
+        )
+        print("\n" + msg + "\n")
+        if send_telegram:
+            print("📤 Sending Alert to Telegram Channel...")
+            send_telegram_message(msg, target_chat_id=target_chat_id)
+        return msg
+
     if summary.get('status') == 'NO_PREDICTIONS':
-        print(f"⚠️ No morning predictions found for {date_str}. Running morning prediction first...")
-        run_morning_mode(date_str, send_telegram=False)
-        summary = predictor.retrain_evening_feedback_loop(date_str, DEFAULT_TECH_TICKERS)
+        msg = (
+            f"⚠️ *Evening Market Alert ({date_str}):*\n"
+            f"No morning predictions were recorded for {date_str}.\n"
+            f"Evening P&L report cannot be generated without morning session predictions."
+        )
+        print("\n" + msg + "\n")
+        if send_telegram:
+            print("📤 Sending Alert to Telegram Channel...")
+            send_telegram_message(msg, target_chat_id=target_chat_id)
+        return msg
 
     # Generate Detailed Evening Report
     report = generate_evening_report_markdown(date_str, summary)

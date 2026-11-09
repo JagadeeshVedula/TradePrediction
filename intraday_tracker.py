@@ -15,7 +15,7 @@ from config import (
     TRAILING_SL_PUSH_INR, TRAILING_SL_STEP_INR
 )
 from database import get_predictions_by_date, save_outcomes, get_outcomes_by_date
-from data_fetcher import fetch_intraday_1m_data, normalize_ticker, _to_scalar
+from data_fetcher import fetch_intraday_1m_data, normalize_ticker, _to_scalar, evaluate_intraday_trade_1m
 from telegram_bot import send_telegram_message
 
 def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, single_pass: bool = False):
@@ -121,11 +121,19 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
             bar_high = round(_to_scalar(last_row['High']), 2)
             bar_low = round(_to_scalar(last_row['Low']), 2)
 
+            session_high = round(float(today_bars['High'].max()), 2)
+            session_low = round(float(today_bars['Low'].min()), 2)
+
             pos['current_price'] = curr_price
-            if bar_high > pos['high_price']:
-                pos['high_price'] = bar_high
-            if bar_low < pos['low_price']:
-                pos['low_price'] = bar_low
+            pos['high_price'] = max(pos['high_price'], bar_high, session_high)
+            pos['low_price'] = min(pos['low_price'], bar_low, session_low)
+
+            if pos['high_price'] >= pos['target_price']:
+                pos['target_hit'] = True
+                points_above_target = max(0.0, pos['high_price'] - pos['target_price'])
+                trailing_steps = int(points_above_target)
+                new_stop_loss = round(pos['initial_stop_loss'] + TRAILING_SL_PUSH_INR + trailing_steps * TRAILING_SL_STEP_INR, 2)
+                pos['stop_loss_price'] = max(pos['stop_loss_price'], new_stop_loss)
 
             target_status = "🎯 TARGET HIT (TRAILING)" if pos['target_hit'] else f"Target ₹{pos['target_price']:.2f}"
             print(f"  • {ticker}: Entry ₹{pos['entry_price']:.2f} | Current ₹{curr_price:.2f} (High ₹{pos['high_price']:.2f} / Low ₹{pos['low_price']:.2f}) | SL ₹{pos['stop_loss_price']:.2f} | {target_status}")
@@ -270,6 +278,50 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
 
         if single_pass:
             print("✅ 1-Minute tick pass complete.")
+            # Ensure open positions are evaluated against full day's price action
+            single_outcomes = []
+            for ticker, pos in active_positions.items():
+                if pos['status'] == 'OPEN':
+                    sim = evaluate_intraday_trade_1m(
+                        ticker=ticker,
+                        entry_price=pos['entry_price'],
+                        target_date_str=date_str,
+                        target_rupees=PROFIT_TARGET_INR,
+                        stop_loss_rupees=STOP_LOSS_INR
+                    )
+                    if sim.get('exit_reason') and sim['exit_reason'] not in ['SESSION_PENDING', 'MARKET_NOT_OPEN_YET']:
+                        pos['status'] = 'CLOSED'
+                        pos['exit_price'] = sim['exit_price']
+                        pos['exit_reason'] = sim['exit_reason']
+                        pos['exit_time'] = sim['exit_time']
+                        pos['high_price'] = max(pos['high_price'], sim.get('high_price', pos['entry_price']))
+                        pos['low_price'] = min(pos['low_price'], sim.get('low_price', pos['entry_price']))
+
+                entry_p = pos['entry_price']
+                exit_p = pos['exit_price'] or pos.get('current_price') or pos['high_price']
+                pnl_share = round(exit_p - entry_p, 2) if pos['exit_price'] else 0.0
+                tot_pnl = round(pos['quantity'] * pnl_share, 2)
+                pnl_pct = round((tot_pnl / pos['invested_amount']) * 100, 2) if pos['invested_amount'] > 0 else 0.0
+
+                single_outcomes.append({
+                    'ticker': ticker,
+                    'starting_price': entry_p,
+                    'close_price': exit_p,
+                    'high_price': pos['high_price'],
+                    'low_price': pos['low_price'],
+                    'exit_price': exit_p,
+                    'exit_reason': pos['exit_reason'] or 'OPEN',
+                    'exit_time': pos['exit_time'] or time_str,
+                    'quantity': pos['quantity'],
+                    'invested_amount': pos['invested_amount'],
+                    'pnl_per_share': pnl_share,
+                    'total_pnl': tot_pnl,
+                    'pnl_pct': pnl_pct,
+                    'actual_gain_pct': pnl_pct,
+                    'max_gain_pct': round(((pos['high_price'] - entry_p) / entry_p) * 100, 2) if entry_p > 0 else 0.0,
+                    'status': 'TARGET_MET' if 'TARGET' in (pos['exit_reason'] or '') else ('STOP_LOSS' if 'STOP_LOSS' in (pos['exit_reason'] or '') else 'OPEN')
+                })
+            save_outcomes(date_str, single_outcomes)
             break
 
         if now_ist.weekday() >= 5:
@@ -279,23 +331,23 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
         # Check market close time (15:30 IST)
         if now_ist.hour >= 15 and now_ist.minute >= 30:
             print("🌆 Market Close Time Reached (15:30 IST). Closing 1-minute monitoring daemon.")
-            # Ensure any still-open positions are closed at current market price
+            # Ensure any still-open positions are closed accurately via minute-by-minute simulation
             final_outcomes = []
             for ticker, pos in active_positions.items():
                 if pos['status'] == 'OPEN':
+                    sim = evaluate_intraday_trade_1m(
+                        ticker=ticker,
+                        entry_price=pos['entry_price'],
+                        target_date_str=date_str,
+                        target_rupees=PROFIT_TARGET_INR,
+                        stop_loss_rupees=STOP_LOSS_INR
+                    )
                     pos['status'] = 'CLOSED'
-                    close_p = pos.get('current_price') or pos['high_price']
-                    if pos.get('target_hit') and pos.get('stop_loss_price'):
-                        close_p = max(close_p, pos['stop_loss_price'])
-                    pos['exit_price'] = close_p
-                    pnl_share = round(close_p - pos['entry_price'], 2)
-                    if pos['exit_price'] == pos.get('stop_loss_price'):
-                        pos['exit_reason'] = f'TARGET_MET_TRAILING_STOP (+₹{pnl_share:g})'
-                    elif pos.get('target_hit'):
-                        pos['exit_reason'] = f'TARGET_MET_MARKET_CLOSE (+₹{pnl_share:g})'
-                    else:
-                        pos['exit_reason'] = 'GAIN_MARKET_CLOSE' if pnl_share >= 0 else 'MARKET_CLOSE'
-                    pos['exit_time'] = '15:30'
+                    pos['exit_price'] = sim['exit_price']
+                    pos['exit_reason'] = sim['exit_reason']
+                    pos['exit_time'] = sim['exit_time']
+                    pos['high_price'] = max(pos['high_price'], sim.get('high_price', pos['entry_price']))
+                    pos['low_price'] = min(pos['low_price'], sim.get('low_price', pos['entry_price']))
 
                 entry_p = pos['entry_price']
                 exit_p = pos['exit_price']
@@ -318,7 +370,7 @@ def run_intraday_1m_tracker(date_str: str = None, interval_seconds: int = 60, si
                     'total_pnl': tot_pnl,
                     'pnl_pct': pnl_pct,
                     'actual_gain_pct': pnl_pct,
-                    'max_gain_pct': round(((pos['high_price'] - entry_p) / entry_p) * 100, 2),
+                    'max_gain_pct': round(((pos['high_price'] - entry_p) / entry_p) * 100, 2) if entry_p > 0 else 0.0,
                     'status': 'TARGET_MET' if 'TARGET' in (pos['exit_reason'] or '') else ('STOP_LOSS' if 'STOP_LOSS' in (pos['exit_reason'] or '') else 'CLOSE')
                 })
             save_outcomes(date_str, final_outcomes)

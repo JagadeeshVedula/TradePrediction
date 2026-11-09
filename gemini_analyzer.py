@@ -406,7 +406,7 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     """
     import datetime
     from zoneinfo import ZoneInfo
-    from database import get_predictions_by_date, get_latest_predictions, save_predictions
+    from database import get_predictions_by_date, get_latest_predictions, save_predictions, get_daily_session_status
     from market_news import get_market_context_summary
 
     ist = ZoneInfo("Asia/Kolkata")
@@ -414,13 +414,17 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     if not date_str:
         date_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
 
+    # Check if AI was already determined to be unconfident for today's market
+    session_status = get_daily_session_status(date_str)
+    if session_status and session_status.get('status') == 'AI_UNCONFIDENT':
+        return (
+            f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
+            f"🛡️ *AI is not confident for todays market.*\n"
+            f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
+            f"Capital is 100% preserved and no trades are recommended."
+        )
+
     predictions = get_predictions_by_date(date_str)
-    # If no predictions found for default date, check if today's latest predictions exist
-    if not predictions and not explicit_date:
-        latest = get_latest_predictions()
-        if latest and latest[0].get('date') == date_str:
-            predictions = latest
-            print(f"📌 Using existing predictions recorded on {date_str} for Gemini Deep Analysis.")
 
     # If predictions exist for date, check if they meet confidence threshold
     if predictions and len(predictions) < TOP_N_PREDICTIONS:
@@ -431,21 +435,13 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
             f"Capital is 100% preserved and no trades are recommended."
         )
 
-    # Fallback: if no predictions recorded yet in database, run predictor to generate them
+    # If no predictions recorded yet in database for today
     if not predictions:
-        from ml_model import TechStockPredictor
-        from config import DEFAULT_TECH_TICKERS
-        predictor = TechStockPredictor()
-        top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
-        if not top_picks or len(top_picks) < TOP_N_PREDICTIONS:
-            return (
-                f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
-                f"🛡️ *AI is not confident for todays market.*\n"
-                f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
-                f"Capital is 100% preserved and no trades are recommended."
-            )
-        predictions = top_picks
-        save_predictions(date_str, top_picks)
+        return (
+            f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
+            f"No morning predictions recorded in database for {date_str}. "
+            f"Please run morning prediction (/morning) first so Gemini can analyze today's chosen picks."
+        )
 
     market_context = get_market_context_summary()
 

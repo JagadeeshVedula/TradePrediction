@@ -118,14 +118,25 @@ def generate_evening_report_markdown(date_str: str, summary: Dict[str, Any]) -> 
         
         actual = outcomes_map.get(ticker)
         if actual:
-            exit_p = actual.get('exit_price', actual['close_price'])
-            exit_reason = actual.get('exit_reason', 'MARKET_CLOSE')
-            exit_time = actual.get('exit_time', '15:30')
-            qty = actual.get('quantity', max(1, int(25000 / start_p)))
-            inv_amt = actual.get('invested_amount', round(qty * start_p, 2))
-            pnl_share = actual.get('pnl_per_share', round(exit_p - start_p, 2))
-            stock_pnl = actual.get('total_pnl', round(qty * pnl_share, 2))
-            pnl_pct = actual.get('pnl_pct', round((stock_pnl / inv_amt) * 100, 2) if inv_amt > 0 else 0.0)
+            raw_exit_p = actual.get('exit_price')
+            if raw_exit_p is not None and float(raw_exit_p) > 0:
+                exit_p = float(raw_exit_p)
+            else:
+                exit_p = float(actual.get('close_price') or start_p)
+
+            exit_reason = actual.get('exit_reason') or 'MARKET_CLOSE'
+            exit_time = actual.get('exit_time') or '15:30'
+            qty = int(actual.get('quantity') or 0) or (max(1, int(25000 / start_p)) if start_p > 0 else 0)
+            inv_amt = float(actual.get('invested_amount') or 0.0) or round(qty * start_p, 2)
+            
+            raw_pnl_share = actual.get('pnl_per_share')
+            if raw_pnl_share is not None and not (raw_pnl_share == 0.0 and exit_p != start_p):
+                pnl_share = float(raw_pnl_share)
+            else:
+                pnl_share = round(exit_p - start_p, 2)
+
+            stock_pnl = round(qty * pnl_share, 2)
+            pnl_pct = round((stock_pnl / inv_amt) * 100, 2) if inv_amt > 0 else 0.0
 
             total_invested_portfolio += inv_amt
             total_pnl_portfolio += stock_pnl

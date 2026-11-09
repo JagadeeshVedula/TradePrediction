@@ -251,22 +251,45 @@ class TechStockPredictor:
 
     def retrain_evening_feedback_loop(self, date_str: str, universe_tickers: List[str]) -> Dict[str, Any]:
         """Post-close market feedback loop: evaluate 1-minute intraday trades and retrain model."""
-        session_status = get_daily_session_status(date_str)
-        if session_status and session_status.get('status') == 'AI_UNCONFIDENT':
-            print(f"🛡️ Daily Session Status for {date_str}: AI was not confident for trading (>95% threshold not met). Capital was 100% preserved.")
-            return {
-                'status': 'AI_UNCONFIDENT',
-                'date': date_str,
-                'message': f"AI was not confident for trading on {date_str} (>95% confidence threshold not met). Capital was 100% preserved. No trades executed."
-            }
-
+        # 1. Fetch predictions and recorded outcomes for target date
         predictions = get_predictions_by_date(date_str)
+        existing_outcomes = get_outcomes_by_date(date_str)
+
+        # 2. If predictions table was cleared but outcomes table has today's stocks, reconstruct predictions from outcomes!
+        if not predictions and existing_outcomes:
+            predictions = []
+            for idx, o in enumerate(existing_outcomes, start=1):
+                entry_p = float(o.get('starting_price', 0.0))
+                qty = int(o.get('quantity', 0)) or (max(1, int(INVESTMENT_PER_STOCK / entry_p)) if entry_p > 0 else 0)
+                inv_amt = float(o.get('invested_amount', 0.0)) or round(qty * entry_p, 2)
+                predictions.append({
+                    'date': date_str,
+                    'ticker': o['ticker'],
+                    'rank': idx,
+                    'starting_price': entry_p,
+                    'expected_gain_pct': 2.0,
+                    'target_price': round(entry_p + PROFIT_TARGET_INR, 2),
+                    'stop_loss': round(entry_p - STOP_LOSS_INR, 2),
+                    'confidence_score': 96.0,
+                    'quantity': qty,
+                    'invested_amount': inv_amt,
+                    'signal_reasons': 'Morning Intraday Selection'
+                })
+            print(f"📌 Found {len(predictions)} stock positions recorded in outcomes for {date_str}.")
+
+        # 3. Only if BOTH predictions and outcomes are empty, check daily session status
         if not predictions:
-            print(f"⚠️ No morning predictions recorded for date {date_str} to evaluate.")
+            session_status = get_daily_session_status(date_str)
+            if session_status and session_status.get('status') == 'AI_UNCONFIDENT':
+                print(f"🛡️ Daily Session Status for {date_str}: AI was not confident for trading (>95% threshold not met). Capital was 100% preserved.")
+                return {
+                    'status': 'AI_UNCONFIDENT',
+                    'date': date_str,
+                    'message': f"AI was not confident for trading on {date_str} (>95% confidence threshold not met). Capital was 100% preserved. No trades executed."
+                }
+            print(f"⚠️ No morning predictions or outcomes recorded for date {date_str} to evaluate.")
             return {'status': 'NO_PREDICTIONS', 'date': date_str}
 
-        # Check if outcomes were ALREADY recorded by the live intraday tracker today
-        existing_outcomes = get_outcomes_by_date(date_str)
         valid_existing = {
             o['ticker']: o for o in existing_outcomes
             if o.get('exit_reason') and o.get('exit_reason') not in ['OPEN', 'MARKET_NOT_OPEN_YET', 'SESSION_PENDING']
@@ -283,6 +306,13 @@ class TechStockPredictor:
             invested_amount = round(quantity * entry_price, 2)
 
             existing_trade = valid_existing.get(ticker)
+            if existing_trade:
+                ex_exit_p = float(existing_trade.get('exit_price', 0.0) or 0.0)
+                if ex_exit_p <= 0.0:
+                    ex_exit_p = float(existing_trade.get('close_price', 0.0) or entry_price)
+                    existing_trade['exit_price'] = ex_exit_p
+                    existing_trade['pnl_per_share'] = round(ex_exit_p - entry_price, 2)
+
             # Replay 1m bars to verify true price action & trailing stop loss triggers
             sim_trade = evaluate_intraday_trade_1m(
                 ticker=ticker,
@@ -299,14 +329,16 @@ class TechStockPredictor:
                 sim_reason = sim_trade.get('exit_reason', '')
                 sim_pnl = float(sim_trade.get('pnl_per_share', 0.0))
 
-                if 'TARGET' in ex_reason:
+                if 'TARGET' in ex_reason and ex_pnl > 0:
                     # Live tracker already executed an intentional target/trailing exit; respect live execution
                     trade = existing_trade
                 elif 'TARGET' in sim_reason and sim_pnl > ex_pnl:
                     # Existing trade was erroneously recorded at MARKET_CLOSE; rescue with verified target trailing SL
                     trade = sim_trade
-                else:
+                elif ex_reason not in ['MARKET_CLOSE', '']:
                     trade = existing_trade
+                else:
+                    trade = sim_trade
             else:
                 trade = sim_trade
 

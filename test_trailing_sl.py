@@ -337,7 +337,7 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         evening mode reports 100% capital preserved without generating new trades.
         """
         from database import set_daily_session_status
-        date_str = "2026-11-09"
+        date_str = "2020-01-01"
         set_daily_session_status(date_str, "AI_UNCONFIDENT", "Confidence threshold not met")
 
         with patch('main.run_morning_mode') as mock_morning:
@@ -345,6 +345,47 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
             mock_morning.assert_not_called()
             self.assertIn("AI was not confident for today's market", msg)
             self.assertIn("Capital is 100% preserved", msg)
+
+    def test_evening_mode_restores_from_outcomes_if_predictions_table_empty(self):
+        """
+        Verify that if predictions table is empty but outcomes table has today's stocks,
+        the system restores the stocks from outcomes table and generates the evening report
+        instead of reporting 'AI not confident'.
+        """
+        date_str = "2020-01-05"
+        mock_outcomes = [
+            {
+                'date': date_str,
+                'ticker': 'WIPRO.NS',
+                'starting_price': 400.0,
+                'close_price': 402.0,
+                'high_price': 403.0,
+                'low_price': 399.5,
+                'actual_gain_pct': 0.5,
+                'max_gain_pct': 0.75,
+                'status': 'TARGET_MET',
+                'quantity': 62,
+                'invested_amount': 24800.0,
+                'exit_price': 402.0,
+                'exit_reason': 'TARGET_MET_TRAILING_STOP (+₹2.00)',
+                'exit_time': '12:30',
+                'pnl_per_share': 2.0,
+                'total_pnl': 124.0,
+                'pnl_pct': 0.5
+            }
+        ]
+        save_predictions(date_str, [])  # Simulate cleared predictions table
+        save_outcomes(date_str, mock_outcomes)
+
+        predictor = TechStockPredictor()
+        with patch.object(predictor, 'save_model'):
+            with patch('ml_model.fetch_historical_training_dataset', return_value=(pd.DataFrame(), pd.Series())):
+                summary = predictor.retrain_evening_feedback_loop(date_str, ['WIPRO.NS'])
+
+        self.assertNotEqual(summary.get('status'), 'AI_UNCONFIDENT')
+        self.assertNotEqual(summary.get('status'), 'NO_PREDICTIONS')
+        self.assertEqual(len(summary.get('predictions', [])), 1)
+        self.assertEqual(summary['predictions'][0]['ticker'], 'WIPRO.NS')
 
     def test_evening_mode_locks_trailed_profit_over_erroneous_market_close_loss(self):
         """

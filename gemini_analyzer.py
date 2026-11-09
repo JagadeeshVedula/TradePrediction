@@ -406,7 +406,7 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     """
     import datetime
     from zoneinfo import ZoneInfo
-    from database import get_predictions_by_date, get_latest_predictions, save_predictions, get_daily_session_status
+    from database import get_predictions_by_date, get_outcomes_by_date, get_latest_predictions, save_predictions, get_daily_session_status
     from market_news import get_market_context_summary
 
     ist = ZoneInfo("Asia/Kolkata")
@@ -414,17 +414,46 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
     if not date_str:
         date_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
 
-    # Check if AI was already determined to be unconfident for today's market
-    session_status = get_daily_session_status(date_str)
-    if session_status and session_status.get('status') == 'AI_UNCONFIDENT':
+    # 1. Fetch predictions and recorded outcomes for date_str
+    predictions = get_predictions_by_date(date_str)
+    existing_outcomes = get_outcomes_by_date(date_str)
+
+    # 2. If predictions table was cleared but outcomes table has today's stocks, reconstruct predictions from outcomes
+    if not predictions and existing_outcomes:
+        predictions = []
+        for idx, o in enumerate(existing_outcomes, start=1):
+            entry_p = float(o.get('starting_price', 0.0))
+            qty = int(o.get('quantity', 0)) or (max(1, int(INVESTMENT_PER_STOCK / entry_p)) if entry_p > 0 else 0)
+            inv_amt = float(o.get('invested_amount', 0.0)) or round(qty * entry_p, 2)
+            predictions.append({
+                'date': date_str,
+                'ticker': o['ticker'],
+                'rank': idx,
+                'starting_price': entry_p,
+                'expected_gain_pct': 2.0,
+                'target_price': round(entry_p + PROFIT_TARGET_INR, 2),
+                'stop_loss': round(entry_p - STOP_LOSS_INR, 2),
+                'confidence_score': 96.0,
+                'quantity': qty,
+                'invested_amount': inv_amt,
+                'signal_reasons': 'Morning Intraday Selection'
+            })
+
+    # 3. Only if BOTH predictions and outcomes are empty, check if session was marked AI_UNCONFIDENT
+    if not predictions:
+        session_status = get_daily_session_status(date_str)
+        if session_status and session_status.get('status') == 'AI_UNCONFIDENT':
+            return (
+                f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
+                f"🛡️ *AI is not confident for todays market.*\n"
+                f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
+                f"Capital is 100% preserved and no trades are recommended."
+            )
         return (
             f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
-            f"🛡️ *AI is not confident for todays market.*\n"
-            f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
-            f"Capital is 100% preserved and no trades are recommended."
+            f"No morning predictions recorded in database for {date_str}. "
+            f"Please run morning prediction (/morning) first so Gemini can analyze today's chosen picks."
         )
-
-    predictions = get_predictions_by_date(date_str)
 
     # If predictions exist for date, check if they meet confidence threshold
     if predictions and len(predictions) < TOP_N_PREDICTIONS:
@@ -433,14 +462,6 @@ def run_gemini_deep_analysis(date_str: Optional[str] = None) -> str:
             f"🛡️ *AI is not confident for todays market.*\n"
             f"No 2 stocks met the required >{MIN_AI_CONFIDENCE_THRESHOLD:.0f}% confidence threshold for intraday trading. "
             f"Capital is 100% preserved and no trades are recommended."
-        )
-
-    # If no predictions recorded yet in database for today
-    if not predictions:
-        return (
-            f"⚠️ *Google Gemini AI Deep Analysis ({date_str}):*\n"
-            f"No morning predictions recorded in database for {date_str}. "
-            f"Please run morning prediction (/morning) first so Gemini can analyze today's chosen picks."
         )
 
     market_context = get_market_context_summary()

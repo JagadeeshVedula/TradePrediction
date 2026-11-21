@@ -179,9 +179,8 @@ Overall Global Tone: {market_context.get("overall_tone", "NEUTRAL")}
 2. Filter & Eliminate Risks: Drop candidates that face adverse news or high downside volatility that could hit the -₹{STOP_LOSS_INR:.2f} stop loss.
 3. Select the TOP {TOP_N_PREDICTIONS} Highest-Confidence, Highest-Accuracy Winners: Pick the {TOP_N_PREDICTIONS} stocks with the strongest catalyst alignment (Technical breakout + volume + macro/news tailwind) to achieve +₹{PROFIT_TARGET_INR:.2f} target (with upside trailing stop profit) or early +₹10.00 target.
 4. Assign an Objective AI Confidence Score (0.0% to 100.0%):
-   - You MUST only assign a score > 95.0% (e.g. 95.5% - 98.5%) if you have exceptionally high conviction with strong volume, momentum, favorable news catalysts, and macro support.
-   - If market conditions are uncertain, volatile, or stocks lack clear breakout catalysts, assign a realistic confidence score below 95.0% (e.g. 70.0% - 94.0%).
-   - Do NOT artificially inflate confidence scores above 95.0% if the risk setup does not justify it.
+   - For stocks that possess strong technical breakout alignment (volume surge, bullish momentum, trend support) and positive sectoral/news tailwinds to reach the +₹{PROFIT_TARGET_INR:.2f} intraday target, assign your high conviction confidence score (typically 95.0% - 98.5%).
+   - If market conditions are adverse, highly volatile, or a stock lacks breakout confirmation or faces negative news risks, assign a lower confidence score (e.g. 70.0% - 93.0%).
 5. Provide a crisp, high-impact `signal_reasons` for each (15-20 words max highlighting catalyst, news link, and technical momentum).
 
 ### OUTPUT FORMAT:
@@ -190,7 +189,7 @@ Return ONLY a valid JSON array of exactly {TOP_N_PREDICTIONS} objects in this st
   {{
     "rank": 1,
     "ticker": "TICKER.NS",
-    "confidence_score": 94.5,
+    "confidence_score": 96.5,
     "expected_gain_pct": 2.8,
     "signal_reasons": "US metal rally tailwind + Heavy volume breakout & Bullish MACD crossover",
     "catalyst": "Global commodity rally & domestic PSU demand",
@@ -286,8 +285,13 @@ def _fallback_quantitative_ranking(
         item_copy["gemini_selected"] = False
         reasons = item_copy.get("signal_reasons", "Bullish Technical Momentum")
         # Augment with macro context
+        base_conf = item_copy.get("confidence_score", 90.0)
         if overall_tone == "BULLISH":
             reasons = f"Global Bullish Support | {reasons}"
+            item_copy["confidence_score"] = min(98.5, base_conf + 3.0)
+        elif overall_tone == "BEARISH":
+            reasons = f"Macro Headwind Caution | {reasons}"
+            item_copy["confidence_score"] = max(50.0, base_conf - 5.0)
         item_copy["signal_reasons"] = reasons
         top_picks.append(item_copy)
 

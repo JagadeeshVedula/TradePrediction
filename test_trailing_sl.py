@@ -16,7 +16,7 @@ from data_fetcher import evaluate_intraday_trade_1m, FEATURE_COLUMNS
 from reporter import generate_morning_report_markdown, generate_evening_report_markdown
 from database import save_predictions, get_predictions_by_date, save_outcomes, get_outcomes_by_date
 from ml_model import TechStockPredictor
-from main import run_morning_mode, run_evening_mode
+from main import run_morning_mode, run_evening_mode, run_full_cycle_mode
 
 class TestTrailingStopLossAndPipeline(unittest.TestCase):
 
@@ -459,6 +459,92 @@ class TestTrailingStopLossAndPipeline(unittest.TestCase):
         self.assertEqual(outcomes[0]['exit_price'], 152.0)
         self.assertGreater(outcomes[0]['pnl_per_share'], 0)
         self.assertIn("TARGET_MET_TRAILING_STOP", outcomes[0]['exit_reason'])
+
+    def test_morning_mode_preserves_existing_predictions_without_force(self):
+        """
+        Verify that run_morning_mode preserves existing predictions for a date
+        and does NOT recalculate or wipe them out unless force=True.
+        """
+        date_str = "2020-02-01"
+        mock_picks = [
+            {'date': date_str, 'ticker': 'TATASTEEL.NS', 'starting_price': 150.0, 'expected_gain_pct': 2.5, 'confidence_score': 96.5, 'rank': 1, 'quantity': 166, 'invested_amount': 24900.0, 'target_price': 152.0, 'stop_loss': 149.0},
+            {'date': date_str, 'ticker': 'BEL.NS', 'starting_price': 280.0, 'expected_gain_pct': 2.2, 'confidence_score': 95.8, 'rank': 2, 'quantity': 89, 'invested_amount': 24920.0, 'target_price': 282.0, 'stop_loss': 279.0}
+        ]
+        save_predictions(date_str, mock_picks)
+
+        with patch.object(TechStockPredictor, 'predict_top_5_gainers') as mock_predict:
+            report = run_morning_mode(date_str, send_telegram=False, force=False)
+            mock_predict.assert_not_called()
+            self.assertIn("TATASTEEL.NS", report)
+            self.assertIn("BEL.NS", report)
+            # Ensure predictions still intact in database
+            stored = get_predictions_by_date(date_str)
+            self.assertEqual(len(stored), 2)
+
+    def test_full_cycle_mode_preserves_existing_morning_predictions(self):
+        """
+        Verify that run_full_cycle_mode does not re-predict and wipe out valid
+        morning predictions when executed later in the day.
+        """
+        date_str = "2020-02-02"
+        mock_picks = [
+            {'date': date_str, 'ticker': 'TATASTEEL.NS', 'starting_price': 150.0, 'expected_gain_pct': 2.5, 'confidence_score': 96.5, 'rank': 1, 'quantity': 166, 'invested_amount': 24900.0, 'target_price': 152.0, 'stop_loss': 149.0},
+            {'date': date_str, 'ticker': 'BEL.NS', 'starting_price': 280.0, 'expected_gain_pct': 2.2, 'confidence_score': 95.8, 'rank': 2, 'quantity': 89, 'invested_amount': 24920.0, 'target_price': 282.0, 'stop_loss': 279.0}
+        ]
+        save_predictions(date_str, mock_picks)
+
+        with patch('main.run_morning_mode') as mock_morning:
+            with patch('main.run_intraday_1m_tracker') as mock_tracker:
+                with patch('main.run_evening_mode') as mock_evening:
+                    run_full_cycle_mode(date_str, send_telegram=False)
+                    # Morning mode should NOT have been re-run to wipe predictions
+                    mock_morning.assert_not_called()
+                    mock_tracker.assert_called_once()
+                    mock_evening.assert_called_once()
+
+        # Database must still have the 2 morning picks
+        stored = get_predictions_by_date(date_str)
+        self.assertEqual(len(stored), 2)
+
+    def test_confidence_score_formula_high_confluence(self):
+        """
+        Verify that high technical confluence (expected gain >= 2.5%, RSI in 45-68,
+        volume surge >= 1.25, MACD > 0, EMA9 > EMA21, Return_1D > 0) scores > 95.0% confidence.
+        """
+        high_features = {
+            'rsi_14': 56.0,
+            'volume_ratio': 1.35,
+            'macd': 0.8,
+            'macd_signal': 0.3,
+            'macd_hist': 0.5,
+            'ema_9_diff': 1.5,
+            'ema_20_diff': 2.0,
+            'sma_50_diff': 3.0,
+            'momentum_1d': 1.2,
+            'momentum_3d': 2.5,
+            'momentum_5d': 4.0,
+            'atr_pct': 1.8,
+            'gap_pct': 0.2,
+            'intraday_range': 2.1
+        }
+        for col in FEATURE_COLUMNS:
+            if col not in high_features:
+                high_features[col] = 1.0
+
+        predictor = TechStockPredictor()
+        with patch('ml_model.fetch_latest_ticker_features', return_value={'starting_price': 150.0, 'features': high_features}):
+            with patch.object(predictor, 'model_rf', MagicMock(predict=MagicMock(return_value=[3.0]))):
+                with patch.object(predictor, 'model_gb', MagicMock(predict=MagicMock(return_value=[3.2]))):
+                    with patch.object(predictor, 'scaler', MagicMock(transform=MagicMock(return_value=[[1]*len(FEATURE_COLUMNS)]))):
+                        with patch('ml_model.get_market_context_summary', return_value={'overall_tone': 'BULLISH', 'news_items': []}):
+                            with patch('ml_model.fetch_stock_specific_news', return_value=[]):
+                                # Gemini call fallback / quantitative ranking
+                                with patch('ml_model.analyze_and_rank_predictions_with_gemini', side_effect=lambda cands, ctx: cands):
+                                    picks = predictor.predict_top_5_gainers(['TATASTEEL.NS', 'BEL.NS'])
+
+        self.assertEqual(len(picks), 2)
+        for p in picks:
+            self.assertGreaterEqual(p['confidence_score'], 95.0)
 
 if __name__ == '__main__':
     unittest.main()

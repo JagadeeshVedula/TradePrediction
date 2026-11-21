@@ -10,7 +10,7 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
 from config import DEFAULT_TECH_TICKERS, TOP_N_PREDICTIONS, MIN_AI_CONFIDENCE_THRESHOLD
-from database import init_db, save_predictions, save_outcomes
+from database import init_db, save_predictions, save_outcomes, get_predictions_by_date
 
 from ml_model import TechStockPredictor
 from reporter import generate_morning_report_markdown, generate_evening_report_markdown
@@ -36,6 +36,11 @@ def parse_args():
         action="store_true",
         help="Force sending report to Telegram channel regardless of default mode"
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-running predictions even if existing predictions already exist for today"
+    )
     return parser.parse_args()
 
 def run_train_initial():
@@ -47,11 +52,23 @@ def run_train_initial():
 
 from typing import Optional
 
-def run_morning_mode(date_str: str, send_telegram: bool = False, target_chat_id: Optional[str] = None):
+def run_morning_mode(date_str: str, send_telegram: bool = False, target_chat_id: Optional[str] = None, force: bool = False):
     print(f"🌅 Running Morning Analysis for Top Indian Stocks under ₹500 ({date_str})...")
     init_db()
+
+    # Preserve and reuse existing valid morning predictions if already generated for today
+    if not force:
+        existing = get_predictions_by_date(date_str)
+        if existing and len(existing) >= TOP_N_PREDICTIONS:
+            print(f"📌 Preserving active Top {len(existing)} morning predictions already recorded for {date_str}.")
+            report = generate_morning_report_markdown(date_str, existing)
+            print("\n" + report + "\n")
+            if send_telegram:
+                print("📤 Sending Morning Report to Telegram Channel...")
+                send_telegram_message(report, target_chat_id=target_chat_id)
+            return report
+
     predictor = TechStockPredictor()
-    
     top_picks = predictor.predict_top_5_gainers(DEFAULT_TECH_TICKERS)
     if not top_picks or len(top_picks) < TOP_N_PREDICTIONS:
         msg = (
@@ -61,7 +78,10 @@ def run_morning_mode(date_str: str, send_telegram: bool = False, target_chat_id:
             f"💰 Capital is 100% preserved. No trades recommended today."
         )
         print("\n" + msg + "\n")
-        save_predictions(date_str, [])
+        # Only wipe predictions if no valid predictions were already stored today
+        existing = get_predictions_by_date(date_str)
+        if not existing or len(existing) < TOP_N_PREDICTIONS:
+            save_predictions(date_str, [])
         if send_telegram:
             print("📤 Sending Alert to Telegram Channel...")
             send_telegram_message(msg, target_chat_id=target_chat_id)
@@ -136,11 +156,16 @@ def run_full_cycle_mode(date_str: str, send_telegram: bool = True, target_chat_i
     print(f"🔄 Executing Full Pipeline Cycle for {date_str}...")
     
     # Phase 1: Morning Prediction
-    print("🌅 Phase 1: Generating Morning Predictions (< ₹500 stocks)...")
-    morning_res = run_morning_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
-    if morning_res and "AI is not confident" in str(morning_res):
-        print(f"🛑 Halting full cycle for {date_str}: AI is not confident for today's market. Capital preserved.")
-        return morning_res
+    print("🌅 Phase 1: Checking / Generating Morning Predictions (< ₹500 stocks)...")
+    existing = get_predictions_by_date(date_str)
+    if existing and len(existing) >= TOP_N_PREDICTIONS:
+        print(f"📌 Phase 1: Reusing existing Top {len(existing)} morning predictions recorded for {date_str}.")
+        morning_res = generate_morning_report_markdown(date_str, existing)
+    else:
+        morning_res = run_morning_mode(date_str, send_telegram=send_telegram, target_chat_id=target_chat_id)
+        if morning_res and "AI is not confident" in str(morning_res):
+            print(f"🛑 Halting full cycle for {date_str}: AI is not confident for today's market. Capital preserved.")
+            return morning_res
 
     # Phase 2: Intraday 1-Minute Monitoring
     now_ist = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -180,7 +205,7 @@ def main():
     if args.mode == "train-initial":
         run_train_initial()
     elif args.mode == "morning":
-        run_morning_mode(date_str, send_telegram=args.send_telegram)
+        run_morning_mode(date_str, send_telegram=args.send_telegram, force=args.force)
     elif args.mode in ["analysis", "gemini-analysis"]:
         run_analysis_mode(date_str, send_telegram=True)
     elif args.mode == "evening":

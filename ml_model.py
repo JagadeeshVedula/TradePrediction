@@ -189,13 +189,38 @@ class TechStockPredictor:
             pred_gb = self.model_gb.predict(scaled_features)[0]
             expected_gain = (pred_rf * 0.5) + (pred_gb * 0.5)
 
-            # Adjust confidence score based on technical alignment
+            # Adjust confidence score based on technical confluence
             rsi = features.get('rsi_14', 50)
             vol_ratio = features.get('volume_ratio', 1.0)
             mom1d = features.get('momentum_1d', 0)
+            macd_hist = features.get('macd_hist', 0)
+            ema9_diff = features.get('ema_9_diff', 0)
             
-            confidence = 50.0 + (expected_gain * 8.0) + (10 if rsi > 50 else 0) + (10 if vol_ratio > 1.2 else 0)
-            confidence = min(98.5, max(45.0, confidence))
+            # Base confidence score
+            conf = 55.0
+            # Expected gain contribution (+6 to +15 pts)
+            conf += max(0.0, expected_gain * 6.0)
+            # Bullish RSI sweet spot (+8 pts)
+            if 45.0 <= rsi <= 68.0:
+                conf += 8.0
+            elif rsi < 40.0:
+                conf += 5.0  # Oversold bounce
+            # Volume surge (+8 to +12 pts)
+            if vol_ratio >= 1.5:
+                conf += 12.0
+            elif vol_ratio >= 1.15:
+                conf += 8.0
+            # MACD bullish crossover (+6 pts)
+            if macd_hist > 0:
+                conf += 6.0
+            # Trend support above 9 EMA (+6 pts)
+            if ema9_diff > 0:
+                conf += 6.0
+            # Positive 1-day momentum (+4 pts)
+            if mom1d > 0:
+                conf += 4.0
+
+            confidence = min(98.5, max(45.0, conf))
 
             target_gain_pct = round(max(expected_gain, DEFAULT_GAIN_TARGET_PCT), 2)
             

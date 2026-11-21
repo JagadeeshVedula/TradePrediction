@@ -186,19 +186,31 @@ def register_bot_commands() -> bool:
         print(f"Notice: Failed registering Telegram commands: {e}")
         return False
 
-def _execute_morning_command(chat_id: str):
+def _execute_morning_command(chat_id: str, force: bool = False):
     """Worker to run morning prediction and reply directly to the requester."""
     import main
     from zoneinfo import ZoneInfo
+    from database import get_predictions_by_date
+    from config import TOP_N_PREDICTIONS
     date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
-    send_telegram_message(
-        f"⏳ *Running Morning Prediction for {date_str}...*\n"
-        f"🔍 Fetching US Market Close (S&P/Nasdaq/Dow), Singapore Straits Times, and Moneycontrol/TOI news.\n"
-        f"🧠 Analyzing candidates (< ₹500) with Google Gemini AI for highest confidence picks. Please wait ~15-20 seconds...",
-        target_chat_id=chat_id
-    )
+    existing = get_predictions_by_date(date_str)
+    if existing and len(existing) >= TOP_N_PREDICTIONS and not force:
+        tickers_str = ", ".join([p.get('ticker', '') for p in existing])
+        send_telegram_message(
+            f"⏳ *Retrieving Morning Prediction for {date_str}...*\n"
+            f"📌 Reusing active morning predictions: *{tickers_str}*\n"
+            f"💡 (Send `/morning force` if you wish to force recalculation)",
+            target_chat_id=chat_id
+        )
+    else:
+        send_telegram_message(
+            f"⏳ *Running Morning Prediction for {date_str}...*\n"
+            f"🔍 Fetching US Market Close (S&P/Nasdaq/Dow), Singapore Straits Times, and Moneycontrol/TOI news.\n"
+            f"🧠 Analyzing candidates (< ₹500) with Google Gemini AI for highest confidence picks. Please wait ~15-20 seconds...",
+            target_chat_id=chat_id
+        )
     try:
-        main.run_morning_mode(date_str, send_telegram=True, target_chat_id=chat_id)
+        main.run_morning_mode(date_str, send_telegram=True, target_chat_id=chat_id, force=force)
     except Exception as e:
         send_telegram_message(f"❌ Error during morning prediction: {e}", target_chat_id=chat_id)
 
@@ -206,16 +218,31 @@ def _execute_full_cycle_command(chat_id: str):
     """Worker to trigger full pipeline cycle (Morning + Monitor + Evening)."""
     import main
     from zoneinfo import ZoneInfo
+    from database import get_predictions_by_date
+    from config import TOP_N_PREDICTIONS
     date_str = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
-    send_telegram_message(
-        f"🔄 *Starting Full Pipeline Cycle for {date_str}...* 🚀\n"
-        f"───────────────────────────\n"
-        f"• 🌅 *Phase 1:* Morning Predictions (< ₹500 stocks, Gemini AI + News)\n"
-        f"• ⏱️ *Phase 2:* 1-Minute Live Intraday Tracking\n"
-        f"• 🌆 *Phase 3:* Evening P&L Report & Retraining\n\n"
-        f"⏳ Processing Morning Prediction now. Please wait ~15-20s...",
-        target_chat_id=chat_id
-    )
+    existing = get_predictions_by_date(date_str)
+    if existing and len(existing) >= TOP_N_PREDICTIONS:
+        tickers_str = ", ".join([p.get('ticker', '') for p in existing])
+        send_telegram_message(
+            f"🔄 *Resuming Full Pipeline Cycle for {date_str}...* 🚀\n"
+            f"───────────────────────────\n"
+            f"• 🌅 *Phase 1:* Reusing active morning predictions: *{tickers_str}*\n"
+            f"• ⏱️ *Phase 2:* 1-Minute Live Intraday Tracking\n"
+            f"• 🌆 *Phase 3:* Evening P&L Report & Retraining\n\n"
+            f"⏳ Proceeding to Phase 2 Live Tracking now...",
+            target_chat_id=chat_id
+        )
+    else:
+        send_telegram_message(
+            f"🔄 *Starting Full Pipeline Cycle for {date_str}...* 🚀\n"
+            f"───────────────────────────\n"
+            f"• 🌅 *Phase 1:* Morning Predictions (< ₹500 stocks, Gemini AI + News)\n"
+            f"• ⏱️ *Phase 2:* 1-Minute Live Intraday Tracking\n"
+            f"• 🌆 *Phase 3:* Evening P&L Report & Retraining\n\n"
+            f"⏳ Processing Morning Prediction now. Please wait ~15-20s...",
+            target_chat_id=chat_id
+        )
     try:
         main.run_full_cycle_mode(date_str, send_telegram=True, target_chat_id=chat_id)
     except Exception as e:
@@ -349,7 +376,8 @@ def handle_telegram_message(msg: dict):
         send_control_panel(chat_id)
 
     elif cmd == "/morning":
-        threading.Thread(target=_execute_morning_command, args=(chat_id,), daemon=True).start()
+        force = ("force" in args or "--force" in args)
+        threading.Thread(target=_execute_morning_command, args=(chat_id, force), daemon=True).start()
 
     elif cmd in ["/analysis", "/gemini_analysis", "/gemini", "/deep_analysis"]:
         threading.Thread(target=_execute_analysis_command, args=(chat_id,), daemon=True).start()
